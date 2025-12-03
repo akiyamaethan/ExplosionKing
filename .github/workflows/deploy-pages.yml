@@ -1,0 +1,145 @@
+# Build LÖVE game to WebAssembly and deploy to GitHub Pages
+# Triggers on push to main branch
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+# Sets permissions for GitHub Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install love.js dependencies
+        run: |
+          npm install -g love.js
+
+      - name: Create .love file
+        run: |
+          # Package all game files into a .love archive
+          zip -9 -r game.love . -x ".git/*" -x ".github/*" -x "*.md" -x ".pre-commit-config.yaml" -x ".luacheckrc" -x "node_modules/*"
+
+      - name: Build with love.js
+        run: |
+          # Build the web version
+          love.js game.love build -c -t "Explosion King"
+
+      - name: Create custom index.html
+        run: |
+          cat > build/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Explosion King</title>
+              <style>
+                  * {
+                      margin: 0;
+                      padding: 0;
+                      box-sizing: border-box;
+                  }
+                  body {
+                      background: #1a1a2e;
+                      color: #eee;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      min-height: 100vh;
+                      display: flex;
+                      flex-direction: column;
+                      align-items: center;
+                      justify-content: center;
+                      padding: 20px;
+                  }
+                  h1 {
+                      margin-bottom: 20px;
+                      color: #ff6b35;
+                  }
+                  #canvas-container {
+                      border: 3px solid #ff6b35;
+                      border-radius: 8px;
+                      overflow: hidden;
+                      box-shadow: 0 0 30px rgba(255, 107, 53, 0.3);
+                  }
+                  canvas {
+                      display: block;
+                  }
+                  .loading {
+                      margin-top: 20px;
+                      color: #888;
+                  }
+                  .controls {
+                      margin-top: 20px;
+                      color: #888;
+                      text-align: center;
+                  }
+              </style>
+          </head>
+          <body>
+              <h1>Explosion King</h1>
+              <div id="canvas-container">
+                  <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+              </div>
+              <p class="loading" id="loading">Loading game...</p>
+              <div class="controls">
+                  <p>A/D or Arrow Keys to move | Space/W/Up to jump | ESC to quit</p>
+              </div>
+
+              <script type="text/javascript" src="game.js"></script>
+              <script type="text/javascript">
+                  var loadingElement = document.getElementById('loading');
+                  var Module = {
+                      canvas: document.getElementById('canvas'),
+                      arguments: ['./game.love'],
+                      printErr: console.error,
+                      print: console.log,
+                      setStatus: function(text) {
+                          if (text) {
+                              loadingElement.textContent = text;
+                          } else {
+                              loadingElement.style.display = 'none';
+                          }
+                      }
+                  };
+              </script>
+              <script type="text/javascript" src="love.js"></script>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'build'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -6,50 +6,85 @@ local world
 local player
 local ground
 local walls = {}  -- Screen boundary walls
-local floatingCircles = {}
+local buildingBlocks = {}  -- Draggable shapes
 
 -- Constants
 local PLAYER_RADIUS = 30
-local FLOATING_RADIUS = 12
-local FLOATING_COUNT = 20
+local BLOCK_SIZE = PLAYER_RADIUS * 2  -- Roughly player size
 local GROUND_HEIGHT = 50
 
 -- Explosion constants
 local EXPLOSION_RADIUS = PLAYER_RADIUS * 3  -- 3x player radius
 local EXPLOSION_FORCE = 1600  -- Base force, tuned to launch ~1/3 screen height from ground
 
--- Custom circle query that handles both circle and polygon shapes
--- (Windfield's queryCircleArea has a bug with circle shapes)
-function queryCircleArea(world, cx, cy, radius)
-    local colliders = world:queryCircleArea(cx, cy, radius, {'All'})
-    return colliders
-end
+-- Drag and drop state
+local draggedBlock = nil
+local dragOffsetX, dragOffsetY = 0, 0
 
--- Simple distance-based query as fallback
-function getCollidersInRadius(cx, cy, radius, colliderList, groundCollider)
+-- Target state
+local target = {x = 0, y = 0, radius = 40}
+local gameWon = false
+
+-- Simple distance-based query for explosion
+function getCollidersInRadius(cx, cy, radius)
     local results = {}
-
-    -- Check ground (rectangle) - use closest point on rectangle
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local groundTop = windowHeight - GROUND_HEIGHT
 
-    -- If player is within radius of ground surface
+    -- Check ground
     if cy + radius >= groundTop then
-        table.insert(results, {collider = groundCollider, x = cx, y = groundTop})
+        table.insert(results, {collider = ground, x = cx, y = groundTop})
     end
 
-    -- Check floating circles
-    for _, circle in ipairs(colliderList) do
-        local ox, oy = circle:getPosition()
-        local dist = math.sqrt((cx - ox)^2 + (cy - oy)^2)
+    -- Check walls
+    local px, py = player:getPosition()
+    -- Left wall
+    if px - radius <= 0 then
+        table.insert(results, {collider = walls.left, x = 0, y = py})
+    end
+    -- Right wall
+    if px + radius >= windowWidth then
+        table.insert(results, {collider = walls.right, x = windowWidth, y = py})
+    end
+    -- Top wall
+    if py - radius <= 0 then
+        table.insert(results, {collider = walls.top, x = px, y = 0})
+    end
 
-        -- Account for the floating circle's radius
-        if dist - FLOATING_RADIUS <= radius then
-            table.insert(results, {collider = circle, x = ox, y = oy})
+    -- Check building blocks
+    for _, block in ipairs(buildingBlocks) do
+        local bx, by = block.collider:getPosition()
+        local dist = math.sqrt((cx - bx)^2 + (cy - by)^2)
+
+        -- Use block size for distance check
+        if dist - BLOCK_SIZE/2 <= radius then
+            table.insert(results, {collider = block.collider, x = bx, y = by})
         end
     end
 
     return results
+end
+
+-- Check if a point is inside a block (for drag detection)
+function isPointInBlock(block, px, py)
+    local bx, by = block.collider:getPosition()
+    local halfSize = BLOCK_SIZE / 2
+
+    if block.shape == "circle" then
+        local dist = math.sqrt((px - bx)^2 + (py - by)^2)
+        return dist <= halfSize
+    else
+        -- Rectangle/triangle bounding box check
+        return px >= bx - halfSize and px <= bx + halfSize and
+               py >= by - halfSize and py <= by + halfSize
+    end
+end
+
+-- Check if position overlaps with player
+function overlapsPlayer(x, y)
+    local px, py = player:getPosition()
+    local dist = math.sqrt((x - px)^2 + (y - py)^2)
+    return dist < PLAYER_RADIUS + BLOCK_SIZE / 2 + 10  -- 10px buffer
 end
 
 function love.load()
@@ -60,12 +95,13 @@ function love.load()
     world:addCollisionClass('Ground')
     world:addCollisionClass('Wall')
     world:addCollisionClass('Player')
-    world:addCollisionClass('Floating')
+    world:addCollisionClass('Block')
+    world:addCollisionClass('BlockDragging', {ignores = {'Player'}})  -- No collision while dragging
 
     -- Get window dimensions
     local windowWidth, windowHeight = love.graphics.getDimensions()
 
-    -- Create ground (static body) - Windfield makes this insanely simple
+    -- Create ground (static body)
     ground = world:newRectangleCollider(0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
     ground:setType('static')
     ground:setCollisionClass('Ground')
@@ -94,39 +130,62 @@ function love.load()
     player:setRestitution(0.3)
     player:setCollisionClass('Player')
 
-    -- Create floating circles (static bodies - no gravity, but collidable)
-    math.randomseed(os.time())
+    -- Create 3 squares centered along the top of the screen
+    local topY = 50  -- Near top of screen
+    local spacing = windowWidth / 4  -- Divide screen into 4 parts, place at 1/4, 2/4, 3/4
 
-    -- Define the "air" zone (above ground, with some padding)
-    local airTop = 50
-    local airBottom = windowHeight - GROUND_HEIGHT - PLAYER_RADIUS * 3
-    local airLeft = FLOATING_RADIUS + 20
-    local airRight = windowWidth - FLOATING_RADIUS - 20
-
-    for i = 1, FLOATING_COUNT do
-        -- Random position in the air zone
-        local x = math.random(airLeft, airRight)
-        local y = math.random(airTop, airBottom)
-
-        -- Static body so it doesn't fall, but still collides
-        local circle = world:newCircleCollider(x, y, FLOATING_RADIUS)
-        circle:setType('static')
-        circle:setCollisionClass('Floating')
-
-        table.insert(floatingCircles, circle)
+    for i = 1, 3 do
+        local x = spacing * i
+        local collider = world:newRectangleCollider(x - BLOCK_SIZE/2, topY - BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE)
+        collider:setType('static')
+        collider:setCollisionClass('Block')
+        table.insert(buildingBlocks, {
+            collider = collider,
+            shape = "square"
+        })
     end
+
+    -- Position target in top right corner
+    target.x = windowWidth - target.radius - 20
+    target.y = target.radius + 20
 end
 
 function love.update(dt)
+    -- Don't update physics if game is won
+    if gameWon then return end
+
     world:update(dt)
+
+    -- Check for victory (player overlaps target)
+    local px, py = player:getPosition()
+    local dist = math.sqrt((px - target.x)^2 + (py - target.y)^2)
+    if dist < target.radius + PLAYER_RADIUS then
+        gameWon = true
+        return
+    end
+
+    -- Update dragged block position
+    if draggedBlock then
+        local mx, my = love.mouse.getPosition()
+        local newX, newY = mx + dragOffsetX, my + dragOffsetY
+
+        -- Keep block on screen
+        local windowWidth, windowHeight = love.graphics.getDimensions()
+        local halfSize = BLOCK_SIZE / 2
+        newX = math.max(halfSize, math.min(windowWidth - halfSize, newX))
+        newY = math.max(halfSize, math.min(windowHeight - GROUND_HEIGHT - halfSize, newY))
+
+        draggedBlock.collider:setPosition(newX, newY)
+    end
 end
 
 -- Perform explosion - query nearby objects and calculate repulsion force
 function performExplosion()
+    if gameWon then return end
     local px, py = player:getPosition()
 
-    -- Use our custom query that handles circle shapes properly
-    local nearbyObjects = getCollidersInRadius(px, py, EXPLOSION_RADIUS, floatingCircles, ground)
+    -- Use our custom query that handles all shape types
+    local nearbyObjects = getCollidersInRadius(px, py, EXPLOSION_RADIUS)
 
     -- Calculate cumulative force direction based on nearby objects
     local forceX, forceY = 0, 0
@@ -148,16 +207,14 @@ function performExplosion()
             dy = dy / distance
 
             -- Closer objects contribute more force (inverse relationship)
-            -- Objects at edge of explosion radius contribute less
             local strength = 1 - (distance / EXPLOSION_RADIUS)
-            strength = math.max(0, strength)  -- Clamp to positive
+            strength = math.max(0, strength)
 
             forceX = forceX + dx * strength
             forceY = forceY + dy * strength
             objectsInRange = objectsInRange + 1
         else
-            -- Object is exactly at player position (like ground directly below)
-            -- Default to pushing up
+            -- Object is exactly at player position - push up
             forceY = forceY - 1
             objectsInRange = objectsInRange + 1
         end
@@ -165,15 +222,12 @@ function performExplosion()
 
     -- Only apply force if there are objects to push off of
     if objectsInRange > 0 then
-        -- Normalize the combined force direction
         local magnitude = math.sqrt(forceX * forceX + forceY * forceY)
 
         if magnitude > 0 then
             forceX = forceX / magnitude
             forceY = forceY / magnitude
 
-            -- Apply impulse in the calculated direction
-            -- Scale by number of objects for a more dramatic effect when surrounded
             local finalForce = EXPLOSION_FORCE * math.min(objectsInRange, 3)
             player:applyLinearImpulse(forceX * finalForce, forceY * finalForce)
         end
@@ -186,15 +240,24 @@ function love.draw()
     -- Draw sky background
     love.graphics.setBackgroundColor(0.5, 0.7, 0.9)
 
+    -- Draw target (bullseye pattern)
+    love.graphics.setColor(1, 0, 0)  -- Red outer
+    love.graphics.circle("fill", target.x, target.y, target.radius)
+    love.graphics.setColor(1, 1, 1)  -- White middle
+    love.graphics.circle("fill", target.x, target.y, target.radius * 0.66)
+    love.graphics.setColor(1, 0, 0)  -- Red inner
+    love.graphics.circle("fill", target.x, target.y, target.radius * 0.33)
+
     -- Draw ground (brown)
     love.graphics.setColor(0.4, 0.3, 0.2)
     love.graphics.rectangle("fill", 0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
 
-    -- Draw floating circles (black)
+    -- Draw building blocks (black squares)
     love.graphics.setColor(0, 0, 0)
-    for _, circle in ipairs(floatingCircles) do
-        local x, y = circle:getPosition()
-        love.graphics.circle("fill", x, y, FLOATING_RADIUS)
+    for _, block in ipairs(buildingBlocks) do
+        local bx, by = block.collider:getPosition()
+        local halfSize = BLOCK_SIZE / 2
+        love.graphics.rectangle("fill", bx - halfSize, by - halfSize, BLOCK_SIZE, BLOCK_SIZE)
     end
 
     -- Draw player (green)
@@ -208,10 +271,70 @@ function love.draw()
 
     -- Draw instructions
     love.graphics.setColor(1, 1, 1)
-    love.graphics.print("Press SPACE to explode and propel off nearby objects!", 10, 10)
+    love.graphics.print("SPACE to explode | Drag shapes to build platforms", 10, 10)
 
-    -- Optional: Draw debug physics shapes (uncomment to see collision shapes)
-    -- world:draw()
+    -- Highlight dragged block
+    if draggedBlock then
+        love.graphics.setColor(1, 1, 0, 0.3)
+        local bx, by = draggedBlock.collider:getPosition()
+        love.graphics.circle("line", bx, by, BLOCK_SIZE / 2 + 5)
+    end
+
+    -- Victory screen
+    if gameWon then
+        -- Semi-transparent overlay
+        love.graphics.setColor(0, 0, 0, 0.5)
+        love.graphics.rectangle("fill", 0, 0, windowWidth, windowHeight)
+
+        -- Victory text
+        love.graphics.setColor(1, 1, 1)
+        local font = love.graphics.getFont()
+        local text = "VICTORY"
+        local textWidth = font:getWidth(text)
+        local textHeight = font:getHeight()
+        love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - textHeight/2)
+    end
+end
+
+function love.mousepressed(x, y, button)
+    if gameWon then return end
+    if button == 1 then  -- Left click
+        -- Check if clicking on a building block
+        for _, block in ipairs(buildingBlocks) do
+            if isPointInBlock(block, x, y) then
+                draggedBlock = block
+                local bx, by = block.collider:getPosition()
+                dragOffsetX = bx - x
+                dragOffsetY = by - y
+                -- Disable collision with player while dragging
+                block.collider:setCollisionClass('BlockDragging')
+                break
+            end
+        end
+    end
+end
+
+function love.mousereleased(x, y, button)
+    if button == 1 and draggedBlock then
+        -- Check if drop position overlaps player
+        local bx, by = draggedBlock.collider:getPosition()
+        if overlapsPlayer(bx, by) then
+            -- Push block away from player
+            local px, py = player:getPosition()
+            local dx, dy = bx - px, by - py
+            local dist = math.sqrt(dx * dx + dy * dy)
+            if dist > 0 then
+                dx, dy = dx / dist, dy / dist
+            else
+                dx, dy = 0, -1  -- Default to pushing up
+            end
+            local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
+            draggedBlock.collider:setPosition(px + dx * pushDist, py + dy * pushDist)
+        end
+        -- Re-enable collision with player
+        draggedBlock.collider:setCollisionClass('Block')
+        draggedBlock = nil
+    end
 end
 
 function love.keypressed(key)

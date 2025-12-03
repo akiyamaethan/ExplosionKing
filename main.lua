@@ -25,40 +25,35 @@ local dragOffsetX, dragOffsetY = 0, 0
 local target = {x = 0, y = 0, radius = 40}
 local gameWon = false
 
--- Simple distance-based query for explosion
-function getCollidersInRadius(cx, cy, radius)
+-- Get positions of objects within explosion radius
+function getObjectsInRadius(cx, cy, radius)
     local results = {}
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local groundTop = windowHeight - GROUND_HEIGHT
 
     -- Check ground
     if cy + radius >= groundTop then
-        table.insert(results, {collider = ground, x = cx, y = groundTop})
+        table.insert(results, {x = cx, y = groundTop})
     end
 
     -- Check walls
-    local px, py = player:getPosition()
-    -- Left wall
-    if px - radius <= 0 then
-        table.insert(results, {collider = walls.left, x = 0, y = py})
+    if cx - radius <= 0 then
+        table.insert(results, {x = 0, y = cy})
     end
-    -- Right wall
-    if px + radius >= windowWidth then
-        table.insert(results, {collider = walls.right, x = windowWidth, y = py})
+    if cx + radius >= windowWidth then
+        table.insert(results, {x = windowWidth, y = cy})
     end
-    -- Top wall
-    if py - radius <= 0 then
-        table.insert(results, {collider = walls.top, x = px, y = 0})
+    if cy - radius <= 0 then
+        table.insert(results, {x = cx, y = 0})
     end
 
     -- Check building blocks
     for _, block in ipairs(buildingBlocks) do
-        local bx, by = block.collider:getPosition()
+        local bx, by = block:getPosition()
         local dist = math.sqrt((cx - bx)^2 + (cy - by)^2)
 
-        -- Use block size for distance check
         if dist - BLOCK_SIZE/2 <= radius then
-            table.insert(results, {collider = block.collider, x = bx, y = by})
+            table.insert(results, {x = bx, y = by})
         end
     end
 
@@ -67,17 +62,10 @@ end
 
 -- Check if a point is inside a block (for drag detection)
 function isPointInBlock(block, px, py)
-    local bx, by = block.collider:getPosition()
+    local bx, by = block:getPosition()
     local halfSize = BLOCK_SIZE / 2
-
-    if block.shape == "circle" then
-        local dist = math.sqrt((px - bx)^2 + (py - by)^2)
-        return dist <= halfSize
-    else
-        -- Rectangle/triangle bounding box check
-        return px >= bx - halfSize and px <= bx + halfSize and
-               py >= by - halfSize and py <= by + halfSize
-    end
+    return px >= bx - halfSize and px <= bx + halfSize and
+           py >= by - halfSize and py <= by + halfSize
 end
 
 -- Check if position overlaps with player
@@ -139,10 +127,7 @@ function love.load()
         local collider = world:newRectangleCollider(x - BLOCK_SIZE/2, topY - BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE)
         collider:setType('static')
         collider:setCollisionClass('Block')
-        table.insert(buildingBlocks, {
-            collider = collider,
-            shape = "square"
-        })
+        table.insert(buildingBlocks, collider)
     end
 
     -- Position target in top right corner
@@ -175,7 +160,7 @@ function love.update(dt)
         newX = math.max(halfSize, math.min(windowWidth - halfSize, newX))
         newY = math.max(halfSize, math.min(windowHeight - GROUND_HEIGHT - halfSize, newY))
 
-        draggedBlock.collider:setPosition(newX, newY)
+        draggedBlock:setPosition(newX, newY)
     end
 end
 
@@ -184,8 +169,7 @@ function performExplosion()
     if gameWon then return end
     local px, py = player:getPosition()
 
-    -- Use our custom query that handles all shape types
-    local nearbyObjects = getCollidersInRadius(px, py, EXPLOSION_RADIUS)
+    local nearbyObjects = getObjectsInRadius(px, py, EXPLOSION_RADIUS)
 
     -- Calculate cumulative force direction based on nearby objects
     local forceX, forceY = 0, 0
@@ -255,7 +239,7 @@ function love.draw()
     -- Draw building blocks (black squares)
     love.graphics.setColor(0, 0, 0)
     for _, block in ipairs(buildingBlocks) do
-        local bx, by = block.collider:getPosition()
+        local bx, by = block:getPosition()
         local halfSize = BLOCK_SIZE / 2
         love.graphics.rectangle("fill", bx - halfSize, by - halfSize, BLOCK_SIZE, BLOCK_SIZE)
     end
@@ -276,7 +260,7 @@ function love.draw()
     -- Highlight dragged block
     if draggedBlock then
         love.graphics.setColor(1, 1, 0, 0.3)
-        local bx, by = draggedBlock.collider:getPosition()
+        local bx, by = draggedBlock:getPosition()
         love.graphics.circle("line", bx, by, BLOCK_SIZE / 2 + 5)
     end
 
@@ -303,11 +287,11 @@ function love.mousepressed(x, y, button)
         for _, block in ipairs(buildingBlocks) do
             if isPointInBlock(block, x, y) then
                 draggedBlock = block
-                local bx, by = block.collider:getPosition()
+                local bx, by = block:getPosition()
                 dragOffsetX = bx - x
                 dragOffsetY = by - y
                 -- Disable collision with player while dragging
-                block.collider:setCollisionClass('BlockDragging')
+                block:setCollisionClass('BlockDragging')
                 break
             end
         end
@@ -317,7 +301,7 @@ end
 function love.mousereleased(x, y, button)
     if button == 1 and draggedBlock then
         -- Check if drop position overlaps player
-        local bx, by = draggedBlock.collider:getPosition()
+        local bx, by = draggedBlock:getPosition()
         if overlapsPlayer(bx, by) then
             -- Push block away from player
             local px, py = player:getPosition()
@@ -329,10 +313,10 @@ function love.mousereleased(x, y, button)
                 dx, dy = 0, -1  -- Default to pushing up
             end
             local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
-            draggedBlock.collider:setPosition(px + dx * pushDist, py + dy * pushDist)
+            draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
         end
         -- Re-enable collision with player
-        draggedBlock.collider:setCollisionClass('Block')
+        draggedBlock:setCollisionClass('Block')
         draggedBlock = nil
     end
 end

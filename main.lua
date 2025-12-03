@@ -20,6 +20,15 @@ local EXPLOSION_FORCE = 1600  -- Base force, tuned to launch ~1/3 screen height 
 -- Drag and drop state
 local draggedBlock = nil
 local dragOffsetX, dragOffsetY = 0, 0
+local dragStartX, dragStartY = 0, 0  -- Track where mouse press started
+local DRAG_THRESHOLD = 5  -- Pixels of movement before it's considered a drag
+
+-- Selection state
+local selectedBlock = nil
+
+-- Inventory system
+local inventory = {}  -- Stores picked up blocks: {type = "square", size = BLOCK_SIZE}
+local pickupButton = nil  -- Will hold the pickup button image
 
 -- Target state
 local target = {x = 0, y = 0, radius = 40}
@@ -75,7 +84,24 @@ function overlapsPlayer(x, y)
     return dist < PLAYER_RADIUS + BLOCK_SIZE / 2 + 10  -- 10px buffer
 end
 
+-- Check if a point is inside the pickup button (when a block is selected)
+function isPointInPickupButton(px, py)
+    if not selectedBlock or not pickupButton then return false end
+
+    local bx, by = selectedBlock:getPosition()
+    local buttonWidth = pickupButton:getWidth()
+    local buttonHeight = pickupButton:getHeight()
+    local buttonX = bx - buttonWidth / 2
+    local buttonY = by - buttonHeight / 2
+
+    return px >= buttonX and px <= buttonX + buttonWidth and
+           py >= buttonY and py <= buttonY + buttonHeight
+end
+
 function love.load()
+    -- Load pickup button image
+    pickupButton = love.graphics.newImage("pickupButton.png")
+
     -- Create physics world with gravity using Windfield
     world = wf.newWorld(0, 500, true)
 
@@ -236,12 +262,35 @@ function love.draw()
     love.graphics.setColor(0.4, 0.3, 0.2)
     love.graphics.rectangle("fill", 0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
 
-    -- Draw building blocks (black squares)
-    love.graphics.setColor(0, 0, 0)
+    -- Draw building blocks (highlight selected block)
     for _, block in ipairs(buildingBlocks) do
         local bx, by = block:getPosition()
         local halfSize = BLOCK_SIZE / 2
+
+        -- Use different color for selected block
+        if block == selectedBlock then
+            -- Highlighted color (bright golden yellow)
+            love.graphics.setColor(1, 0.85, 0.2)
+        else
+            -- Normal color (black)
+            love.graphics.setColor(0, 0, 0)
+        end
+
         love.graphics.rectangle("fill", bx - halfSize, by - halfSize, BLOCK_SIZE, BLOCK_SIZE)
+    end
+
+    -- Draw pickup button centered on selected block
+    if selectedBlock then
+        local bx, by = selectedBlock:getPosition()
+
+        -- Center the button on the block
+        local buttonWidth = pickupButton:getWidth()
+        local buttonHeight = pickupButton:getHeight()
+        local buttonX = bx - buttonWidth / 2
+        local buttonY = by - buttonHeight / 2
+
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(pickupButton, buttonX, buttonY)
     end
 
     -- Draw player (green)
@@ -255,7 +304,7 @@ function love.draw()
 
     -- Draw instructions
     love.graphics.setColor(1, 1, 1)
-    love.graphics.print("SPACE to explode | Drag shapes to build platforms", 10, 10)
+    love.graphics.print("SPACE to explode | Drag blocks or Click to pick up", 10, 10)
 
     -- Highlight dragged block
     if draggedBlock then
@@ -283,6 +332,15 @@ end
 function love.mousepressed(x, y, button)
     if gameWon then return end
     if button == 1 then  -- Left click
+        -- First, check if clicking on the pickup button (takes priority)
+        if isPointInPickupButton(x, y) then
+            pickupSelectedBlock()
+            return
+        end
+
+        -- Record start position for click vs drag detection
+        dragStartX, dragStartY = x, y
+
         -- Check if clicking on a building block
         for _, block in ipairs(buildingBlocks) do
             if isPointInBlock(block, x, y) then
@@ -295,12 +353,30 @@ function love.mousepressed(x, y, button)
                 break
             end
         end
+
+        -- If clicked outside any block, deselect current selection
+        if not draggedBlock then
+            selectedBlock = nil
+        end
     end
 end
 
 function love.mousereleased(x, y, button)
     if button == 1 and draggedBlock then
-        -- Check if drop position overlaps player
+        -- Calculate how far the mouse moved during this click
+        local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
+
+        -- If mouse barely moved, treat as a click (select the block)
+        if dragDist < DRAG_THRESHOLD then
+            -- Select this block
+            selectedBlock = draggedBlock
+            -- Re-enable collision since we didn't actually drag
+            draggedBlock:setCollisionClass('Block')
+            draggedBlock = nil
+            return
+        end
+
+        -- Otherwise, it was a drag - handle as before
         local bx, by = draggedBlock:getPosition()
         if overlapsPlayer(bx, by) then
             -- Push block away from player
@@ -327,4 +403,43 @@ function love.keypressed(key)
     elseif key == "space" then
         performExplosion()
     end
+end
+
+-- Pick up the selected block and add it to inventory
+function pickupSelectedBlock()
+    if not selectedBlock or gameWon then return end
+
+    -- Find and remove the block from buildingBlocks array
+    for i, block in ipairs(buildingBlocks) do
+        if block == selectedBlock then
+            -- Add to inventory (store block properties for later use)
+            table.insert(inventory, {
+                type = "square",
+                size = BLOCK_SIZE
+            })
+
+            -- Remove physics body from the world
+            selectedBlock:destroy()
+
+            -- Remove from the blocks table
+            table.remove(buildingBlocks, i)
+
+            -- Clear selection
+            selectedBlock = nil
+
+            -- Debug output (can be removed later)
+            print("Block picked up! Inventory count: " .. #inventory)
+            break
+        end
+    end
+end
+
+-- Get the current inventory (for UI or other systems)
+function getInventory()
+    return inventory
+end
+
+-- Get count of items in inventory
+function getInventoryCount()
+    return #inventory
 end

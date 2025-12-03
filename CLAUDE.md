@@ -13,6 +13,20 @@ OUTPUT REQUIREMENTS:
 
 **Explosion King** is a physics-based puzzle game built with LÖVE (Love2D) and Lua. The game focuses on player-driven physics puzzles involving explosions and force interactions.
 
+
+## Project Requirements
+Your team must deploy a small game prototype satisfying the following requirements:
+
+It is built using a platform (i.e. engine, framework, language) that does not already provide support for 3D rendering and physics simulation.
+It uses a third-party 3D rendering library.
+It uses a third-party physics simulation library.
+The playable prototype presents the player with a simple physics-based puzzle.
+The player is able to exert some control over the simulation in a way that allows them to succeed or fail at the puzzle.
+The game detects success or failure and reports this back to the player using the game's graphics.
+The codebase for the prototype must include some before-commit automation that helps developers, example: Linting
+The codebase for the prototype must include some post-push automation that helps developers, example: Automatic packaging and deployment to GitHub Pages or Itch.io
+
+
 ## Tech Stack
 
 - **Engine**: LÖVE 2D (https://love2d.org/)

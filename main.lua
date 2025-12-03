@@ -262,6 +262,34 @@ function love.draw()
     love.graphics.setColor(0.4, 0.3, 0.2)
     love.graphics.rectangle("fill", 0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
 
+    -- Draw inventory UI over ground (leaving a few pixels of ground visible above)
+    local inventoryTopMargin = 5  -- Pixels of ground visible above inventory
+    local inventoryY = windowHeight - GROUND_HEIGHT + inventoryTopMargin
+    local inventoryHeight = GROUND_HEIGHT - inventoryTopMargin
+
+    -- White background
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, inventoryY, windowWidth, inventoryHeight)
+
+    -- Draw centered content: black square icon + count
+    local iconSize = 24  -- Size of the square icon
+    local font = love.graphics.getFont()
+    local countText = tostring(#inventory)
+    local textWidth = font:getWidth(countText)
+    local spacing = 8  -- Space between icon and text
+    local totalContentWidth = iconSize + spacing + textWidth
+
+    local contentX = (windowWidth - totalContentWidth) / 2
+    local contentY = inventoryY + (inventoryHeight - iconSize) / 2
+
+    -- Black square icon
+    love.graphics.setColor(0, 0, 0)
+    love.graphics.rectangle("fill", contentX, contentY, iconSize, iconSize)
+
+    -- Count text
+    local textY = inventoryY + (inventoryHeight - font:getHeight()) / 2
+    love.graphics.print(countText, contentX + iconSize + spacing, textY)
+
     -- Draw building blocks (highlight selected block)
     for _, block in ipairs(buildingBlocks) do
         local bx, by = block:getPosition()

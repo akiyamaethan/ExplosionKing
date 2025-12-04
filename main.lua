@@ -73,6 +73,219 @@ local stages = {
     }
 }
 
+-- Save system state
+local SAVE_FILE = "autosave.json"
+local showSaveDetectedScreen = false  -- Show save detection UI on startup
+local saveExists = false  -- Whether a save file was detected
+
+-- Simple JSON-like serialization for save data
+local function serializeValue(val)
+    local t = type(val)
+    if t == "number" then
+        return tostring(val)
+    elseif t == "string" then
+        return string.format("%q", val)
+    elseif t == "boolean" then
+        return val and "true" or "false"
+    elseif t == "table" then
+        local parts = {}
+        -- Check if array-like
+        local isArray = #val > 0 or next(val) == nil
+        if isArray then
+            for _, v in ipairs(val) do
+                table.insert(parts, serializeValue(v))
+            end
+            return "[" .. table.concat(parts, ",") .. "]"
+        else
+            for k, v in pairs(val) do
+                table.insert(parts, string.format("%q:%s", k, serializeValue(v)))
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        end
+    end
+    return "null"
+end
+
+-- Save game state to file
+function saveGame()
+    -- Collect block positions
+    local blockData = {}
+    for _, block in ipairs(buildingBlocks) do
+        local bx, by = block:getPosition()
+        table.insert(blockData, {x = bx, y = by})
+    end
+
+    -- Collect player state
+    local px, py = player:getPosition()
+    local vx, vy = player:getLinearVelocity()
+
+    -- Build save data
+    local saveData = {
+        currentStage = currentStage,
+        inventory = inventory,
+        playerX = px,
+        playerY = py,
+        playerVX = vx,
+        playerVY = vy,
+        blocks = blockData,
+        gameWon = gameWon
+    }
+
+    -- Serialize and write
+    local json = serializeValue(saveData)
+    local success, message = love.filesystem.write(SAVE_FILE, json)
+    if success then
+        print("Game saved!")
+    else
+        print("Failed to save: " .. (message or "unknown error"))
+    end
+    return success
+end
+
+-- Parse a simple JSON-like string (basic parser for our save format)
+local function parseValue(str, pos)
+    pos = pos or 1
+    -- Skip whitespace
+    while pos <= #str and str:sub(pos, pos):match("%s") do
+        pos = pos + 1
+    end
+
+    local char = str:sub(pos, pos)
+
+    if char == "{" then
+        -- Object
+        local obj = {}
+        pos = pos + 1
+        while pos <= #str do
+            while pos <= #str and str:sub(pos, pos):match("%s") do pos = pos + 1 end
+            if str:sub(pos, pos) == "}" then return obj, pos + 1 end
+            if str:sub(pos, pos) == "," then pos = pos + 1 end
+            while pos <= #str and str:sub(pos, pos):match("%s") do pos = pos + 1 end
+            if str:sub(pos, pos) == "}" then return obj, pos + 1 end
+            -- Parse key
+            local key, val
+            if str:sub(pos, pos) == '"' then
+                local endQ = str:find('"', pos + 1)
+                key = str:sub(pos + 1, endQ - 1)
+                pos = endQ + 1
+            end
+            while pos <= #str and str:sub(pos, pos):match("[%s:]") do pos = pos + 1 end
+            val, pos = parseValue(str, pos)
+            obj[key] = val
+        end
+        return obj, pos
+    elseif char == "[" then
+        -- Array
+        local arr = {}
+        pos = pos + 1
+        while pos <= #str do
+            while pos <= #str and str:sub(pos, pos):match("%s") do pos = pos + 1 end
+            if str:sub(pos, pos) == "]" then return arr, pos + 1 end
+            if str:sub(pos, pos) == "," then pos = pos + 1 end
+            while pos <= #str and str:sub(pos, pos):match("%s") do pos = pos + 1 end
+            if str:sub(pos, pos) == "]" then return arr, pos + 1 end
+            local val
+            val, pos = parseValue(str, pos)
+            table.insert(arr, val)
+        end
+        return arr, pos
+    elseif char == '"' then
+        -- String
+        local endQ = str:find('"', pos + 1)
+        local val = str:sub(pos + 1, endQ - 1)
+        -- Unescape
+        val = val:gsub('\\"', '"'):gsub("\\\\", "\\")
+        return val, endQ + 1
+    elseif str:sub(pos, pos + 3) == "true" then
+        return true, pos + 4
+    elseif str:sub(pos, pos + 4) == "false" then
+        return false, pos + 5
+    elseif str:sub(pos, pos + 3) == "null" then
+        return nil, pos + 4
+    else
+        -- Number
+        local numStr = str:match("^%-?%d+%.?%d*", pos)
+        if numStr then
+            return tonumber(numStr), pos + #numStr
+        end
+    end
+    return nil, pos
+end
+
+-- Check if save file exists
+function hasSaveFile()
+    return love.filesystem.getInfo(SAVE_FILE) ~= nil
+end
+
+-- Load game state from file
+function loadGameState()
+    if not hasSaveFile() then
+        return nil
+    end
+
+    local content, err = love.filesystem.read(SAVE_FILE)
+    if not content then
+        print("Failed to read save: " .. (err or "unknown error"))
+        return nil
+    end
+
+    local data = parseValue(content)
+    return data
+end
+
+-- Apply loaded save data to game state
+function applySaveData(data)
+    if not data then return false end
+
+    -- Load the stage first (this sets up target position)
+    currentStage = data.currentStage or 1
+    loadStage(currentStage)
+
+    -- Restore inventory
+    inventory = data.inventory or {}
+
+    -- Restore player position and velocity
+    if data.playerX and data.playerY then
+        player:setPosition(data.playerX, data.playerY)
+    end
+    if data.playerVX and data.playerVY then
+        player:setLinearVelocity(data.playerVX, data.playerVY)
+    end
+
+    -- Restore blocks (destroy current and recreate at saved positions)
+    for _, block in ipairs(buildingBlocks) do
+        block:destroy()
+    end
+    buildingBlocks = {}
+
+    if data.blocks then
+        for _, blockData in ipairs(data.blocks) do
+            local halfSize = BLOCK_SIZE / 2
+            local collider = world:newRectangleCollider(
+                blockData.x - halfSize, blockData.y - halfSize,
+                BLOCK_SIZE, BLOCK_SIZE
+            )
+            collider:setType('static')
+            collider:setCollisionClass('Block')
+            table.insert(buildingBlocks, collider)
+        end
+    end
+
+    -- Restore game won state
+    gameWon = data.gameWon or false
+
+    print("Game loaded!")
+    return true
+end
+
+-- Delete save file (for fresh start)
+function deleteSaveFile()
+    if hasSaveFile() then
+        love.filesystem.remove(SAVE_FILE)
+        print("Save file deleted")
+    end
+end
+
 -- Get positions of objects within explosion radius
 function getObjectsInRadius(cx, cy, radius)
     local results = {}
@@ -251,8 +464,15 @@ function love.load()
     player:setRestitution(0.3)
     player:setCollisionClass('Player')
 
-    -- Load the first stage
-    loadStage(currentStage)
+    -- Check for save file before loading stage
+    if hasSaveFile() then
+        saveExists = true
+        showSaveDetectedScreen = true
+        -- Don't load stage yet - wait for user choice
+    else
+        -- No save, load fresh
+        loadStage(currentStage)
+    end
 
     -- Register unified input callbacks
     Input.onPointerPressed = function(x, y) handlePointerPressed(x, y) end
@@ -275,6 +495,9 @@ function loadStage(stageIndex)
             block:destroy()
         end
         buildingBlocks = {}
+
+        -- Delete save when reaching ending (game complete)
+        deleteSaveFile()
 
         print("Loaded Ending Stage")
         currentStage = stageIndex
@@ -329,6 +552,9 @@ function loadStage(stageIndex)
 end
 
 function love.update(dt)
+    -- Don't update physics if save detection screen is showing
+    if showSaveDetectedScreen then return end
+
     -- Don't update physics if game is won
     if gameWon then return end
 
@@ -412,10 +638,85 @@ function performExplosion()
             player:applyLinearImpulse(forceX * finalForce, forceY * finalForce)
         end
     end
+
+    -- Auto-save on every explosion
+    saveGame()
+end
+
+-- Get Y button bounds for save detection screen
+function getSaveYButtonBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local font = love.graphics.getFont()
+    local btnW = 80
+    local btnH = 50
+    local spacing = 40
+    local btnY = windowHeight / 2 + 20
+    local btnX = windowWidth / 2 - btnW - spacing / 2
+    return btnX, btnY, btnW, btnH
+end
+
+-- Get N button bounds for save detection screen
+function getSaveNButtonBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local font = love.graphics.getFont()
+    local btnW = 80
+    local btnH = 50
+    local spacing = 40
+    local btnY = windowHeight / 2 + 20
+    local btnX = windowWidth / 2 + spacing / 2
+    return btnX, btnY, btnW, btnH
+end
+
+-- Check if point is in Y button
+function isPointInSaveYButton(px, py)
+    local bx, by, bw, bh = getSaveYButtonBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+-- Check if point is in N button
+function isPointInSaveNButton(px, py)
+    local bx, by, bw, bh = getSaveNButtonBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
 function love.draw()
     local windowWidth, windowHeight = love.graphics.getDimensions()
+
+    -- Draw save detection screen if active (blocks all other drawing)
+    if showSaveDetectedScreen then
+        -- Dark background
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.rectangle("fill", 0, 0, windowWidth, windowHeight)
+
+        -- Centered text
+        love.graphics.setColor(1, 1, 1)
+        local font = love.graphics.getFont()
+        local text = "Save Detected, Load?"
+        local textWidth = font:getWidth(text)
+        love.graphics.print(text, windowWidth / 2 - textWidth / 2, windowHeight / 2 - 40)
+
+        -- Y button (green)
+        local yX, yY, yW, yH = getSaveYButtonBounds()
+        love.graphics.setColor(0.2, 0.7, 0.2)
+        love.graphics.rectangle("fill", yX, yY, yW, yH, 8, 8)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", yX, yY, yW, yH, 8, 8)
+        local yText = "Y"
+        local yTextWidth = font:getWidth(yText)
+        love.graphics.print(yText, yX + yW / 2 - yTextWidth / 2, yY + yH / 2 - font:getHeight() / 2)
+
+        -- N button (red)
+        local nX, nY, nW, nH = getSaveNButtonBounds()
+        love.graphics.setColor(0.7, 0.2, 0.2)
+        love.graphics.rectangle("fill", nX, nY, nW, nH, 8, 8)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", nX, nY, nW, nH, 8, 8)
+        local nText = "N"
+        local nTextWidth = font:getWidth(nText)
+        love.graphics.print(nText, nX + nW / 2 - nTextWidth / 2, nY + nH / 2 - font:getHeight() / 2)
+
+        return  -- Don't draw anything else
+    end
 
     -- Draw sky background
     love.graphics.setBackgroundColor(0.5, 0.7, 0.9)
@@ -667,10 +968,12 @@ function love.keypressed(key)
     end
 end
 
--- Restart the current stage (clears inventory)
+-- Restart the current stage (clears inventory and save)
 function restartScene()
     -- Clear inventory on restart
     inventory = {}
+    -- Delete save file on restart
+    deleteSaveFile()
     -- Reload current stage
     loadStage(currentStage)
     print("Scene restarted!")
@@ -759,10 +1062,29 @@ end
 
 -- Unified pointer pressed handler (called by Input abstraction)
 function handlePointerPressed(x, y)
+    -- Handle save detection screen buttons
+    if showSaveDetectedScreen then
+        if isPointInSaveYButton(x, y) then
+            -- Load the save
+            local saveData = loadGameState()
+            if saveData then
+                showSaveDetectedScreen = false
+                applySaveData(saveData)
+            end
+        elseif isPointInSaveNButton(x, y) then
+            -- Start fresh, delete save
+            showSaveDetectedScreen = false
+            deleteSaveFile()
+            loadStage(1)
+        end
+        return  -- Block all other input while save screen is showing
+    end
+
     -- Check for ending stage restart button
     if stages[currentStage] and stages[currentStage].type == "ending" then
         if isPointInRestartButton(x, y) then
             inventory = {}
+            deleteSaveFile()  -- Clear save when restarting from ending
             loadStage(1)
         end
         return

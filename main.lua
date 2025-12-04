@@ -78,6 +78,76 @@ local SAVE_FILE = "autosave.json"
 local showSaveDetectedScreen = false  -- Show save detection UI on startup
 local saveExists = false  -- Whether a save file was detected
 
+-- Theme/Visual Style system
+local THEME_SETTINGS_FILE = "theme_settings.txt"
+local currentThemeSetting = "time"  -- "light", "dark", or "time"
+local showOptionsScreen = false
+local dropdownOpen = false
+
+-- Theme color definitions
+local themes = {
+    light = {
+        sky = {0.5, 0.7, 0.9},           -- Light blue sky
+        ground = {0.4, 0.3, 0.2},         -- Brown ground
+        inventoryBg = {1, 1, 1},          -- White inventory
+        inventorySlot = {0.85, 0.85, 0.85}, -- Light gray slots
+        text = {0, 0, 0},                 -- Black text
+        textLight = {1, 1, 1},            -- White text (for dark backgrounds)
+        block = {0, 0, 0},                -- Black blocks
+        blockSelected = {1, 0.85, 0.2},   -- Golden yellow selected
+        player = {0.2, 0.8, 0.2},         -- Green player
+        explosionRadius = {1, 0.5, 0, 0.2}, -- Orange explosion indicator
+        uiBackground = {0.9, 0.9, 0.9},   -- Light UI background
+        uiBorder = {0.5, 0.5, 0.5},       -- Gray border
+    },
+    dark = {
+        sky = {0.1, 0.1, 0.2},            -- Dark night sky
+        ground = {0.2, 0.15, 0.1},        -- Darker ground
+        inventoryBg = {0.2, 0.2, 0.25},   -- Dark inventory
+        inventorySlot = {0.3, 0.3, 0.35}, -- Dark slots
+        text = {0.9, 0.9, 0.9},           -- Light text
+        textLight = {0.9, 0.9, 0.9},      -- Light text
+        block = {0.4, 0.4, 0.5},          -- Gray blocks
+        blockSelected = {0.8, 0.6, 0.1},  -- Darker gold selected
+        player = {0.1, 0.6, 0.1},         -- Darker green player
+        explosionRadius = {1, 0.4, 0, 0.3}, -- Orange explosion indicator
+        uiBackground = {0.15, 0.15, 0.2}, -- Dark UI background
+        uiBorder = {0.4, 0.4, 0.5},       -- Dark border
+    }
+}
+
+-- Get the current effective theme based on setting
+function getCurrentTheme()
+    if currentThemeSetting == "light" then
+        return themes.light
+    elseif currentThemeSetting == "dark" then
+        return themes.dark
+    else -- "time" - time-based
+        local hour = tonumber(os.date("%H"))
+        -- Day: 6 AM to 6 PM (6-18), Night: 6 PM to 6 AM
+        if hour >= 6 and hour < 18 then
+            return themes.light
+        else
+            return themes.dark
+        end
+    end
+end
+
+-- Save theme setting to file
+function saveThemeSetting()
+    love.filesystem.write(THEME_SETTINGS_FILE, currentThemeSetting)
+end
+
+-- Load theme setting from file
+function loadThemeSetting()
+    if love.filesystem.getInfo(THEME_SETTINGS_FILE) then
+        local content = love.filesystem.read(THEME_SETTINGS_FILE)
+        if content == "light" or content == "dark" or content == "time" then
+            currentThemeSetting = content
+        end
+    end
+end
+
 -- Simple JSON-like serialization for save data
 local function serializeValue(val)
     local t = type(val)
@@ -419,6 +489,9 @@ function spawnBlockFromInventory(index, x, y)
 end
 
 function love.load()
+    -- Load theme setting
+    loadThemeSetting()
+
     -- Load pickup button image
     pickupButton = love.graphics.newImage("pickupButton.png")
 
@@ -555,6 +628,9 @@ function love.update(dt)
     -- Don't update physics if save detection screen is showing
     if showSaveDetectedScreen then return end
 
+    -- Don't update physics if options screen is showing
+    if showOptionsScreen then return end
+
     -- Don't update physics if game is won
     if gameWon then return end
 
@@ -679,6 +755,89 @@ function isPointInSaveNButton(px, py)
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
+-- Options button bounds (bottom right corner)
+function getOptionsButtonBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local font = love.graphics.getFont()
+    local text = "Options"
+    local padding = 10
+    local btnW = font:getWidth(text) + padding * 2
+    local btnH = font:getHeight() + padding
+    local btnX = windowWidth - btnW - 10
+    local btnY = windowHeight - GROUND_HEIGHT - btnH - 10
+    return btnX, btnY, btnW, btnH
+end
+
+-- Check if point is in options button
+function isPointInOptionsButton(px, py)
+    local bx, by, bw, bh = getOptionsButtonBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+-- Options screen X button bounds (bottom right of options panel)
+function getOptionsXButtonBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local btnSize = 40
+    local panelW = 300
+    local panelH = 200
+    local panelX = windowWidth / 2 - panelW / 2
+    local panelY = windowHeight / 2 - panelH / 2
+    return panelX + panelW - btnSize - 10, panelY + panelH - btnSize - 10, btnSize, btnSize
+end
+
+-- Check if point is in options X button
+function isPointInOptionsXButton(px, py)
+    local bx, by, bw, bh = getOptionsXButtonBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+-- Theme dropdown bounds
+function getThemeDropdownBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local panelW = 300
+    local panelH = 200
+    local panelX = windowWidth / 2 - panelW / 2
+    local panelY = windowHeight / 2 - panelH / 2
+    local dropW = 150
+    local dropH = 30
+    local dropX = panelX + panelW / 2 - dropW / 2
+    local dropY = panelY + 80
+    return dropX, dropY, dropW, dropH
+end
+
+-- Get dropdown option bounds (when dropdown is open)
+function getThemeDropdownOptionBounds(index)
+    local dropX, dropY, dropW, dropH = getThemeDropdownBounds()
+    return dropX, dropY + dropH * index, dropW, dropH
+end
+
+-- Check if point is in dropdown header
+function isPointInThemeDropdown(px, py)
+    local bx, by, bw, bh = getThemeDropdownBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+-- Check if point is in a dropdown option (returns option index or nil)
+function getDropdownOptionAtPoint(px, py)
+    if not dropdownOpen then return nil end
+    local options = {"light", "dark", "time"}
+    for i, _ in ipairs(options) do
+        local ox, oy, ow, oh = getThemeDropdownOptionBounds(i)
+        if px >= ox and px <= ox + ow and py >= oy and py <= oy + oh then
+            return i
+        end
+    end
+    return nil
+end
+
+-- Get display name for theme setting
+function getThemeDisplayName(setting)
+    if setting == "light" then return "Light"
+    elseif setting == "dark" then return "Dark"
+    else return "Time-Based"
+    end
+end
+
 function love.draw()
     local windowWidth, windowHeight = love.graphics.getDimensions()
 
@@ -718,8 +877,93 @@ function love.draw()
         return  -- Don't draw anything else
     end
 
+    -- Get current theme colors
+    local theme = getCurrentTheme()
+
+    -- Draw options screen if active (blocks all other drawing)
+    if showOptionsScreen then
+        -- Semi-transparent dark overlay
+        love.graphics.setColor(0, 0, 0, 0.7)
+        love.graphics.rectangle("fill", 0, 0, windowWidth, windowHeight)
+
+        -- Options panel
+        local panelW = 300
+        local panelH = 200
+        local panelX = windowWidth / 2 - panelW / 2
+        local panelY = windowHeight / 2 - panelH / 2
+
+        -- Panel background
+        love.graphics.setColor(theme.uiBackground[1], theme.uiBackground[2], theme.uiBackground[3])
+        love.graphics.rectangle("fill", panelX, panelY, panelW, panelH, 10, 10)
+        love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+        love.graphics.rectangle("line", panelX, panelY, panelW, panelH, 10, 10)
+
+        -- Title
+        local font = love.graphics.getFont()
+        love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
+        local title = "Options"
+        local titleWidth = font:getWidth(title)
+        love.graphics.print(title, panelX + panelW / 2 - titleWidth / 2, panelY + 20)
+
+        -- Visual Style label
+        local label = "Visual Style:"
+        love.graphics.print(label, panelX + panelW / 2 - font:getWidth(label) / 2, panelY + 55)
+
+        -- Dropdown
+        local dropX, dropY, dropW, dropH = getThemeDropdownBounds()
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("fill", dropX, dropY, dropW, dropH, 4, 4)
+        love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+        love.graphics.rectangle("line", dropX, dropY, dropW, dropH, 4, 4)
+
+        -- Current selection text
+        love.graphics.setColor(0, 0, 0)
+        local selText = getThemeDisplayName(currentThemeSetting)
+        love.graphics.print(selText, dropX + 10, dropY + dropH / 2 - font:getHeight() / 2)
+
+        -- Dropdown arrow
+        love.graphics.polygon("fill",
+            dropX + dropW - 20, dropY + dropH / 2 - 4,
+            dropX + dropW - 10, dropY + dropH / 2 - 4,
+            dropX + dropW - 15, dropY + dropH / 2 + 4
+        )
+
+        -- Dropdown options (if open)
+        if dropdownOpen then
+            local options = {"light", "dark", "time"}
+            for i, opt in ipairs(options) do
+                local ox, oy, ow, oh = getThemeDropdownOptionBounds(i)
+                -- Highlight if current selection
+                if opt == currentThemeSetting then
+                    love.graphics.setColor(0.8, 0.9, 1)
+                else
+                    love.graphics.setColor(1, 1, 1)
+                end
+                love.graphics.rectangle("fill", ox, oy, ow, oh)
+                love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+                love.graphics.rectangle("line", ox, oy, ow, oh)
+                love.graphics.setColor(0, 0, 0)
+                love.graphics.print(getThemeDisplayName(opt), ox + 10, oy + oh / 2 - font:getHeight() / 2)
+            end
+        end
+
+        -- X button (red, bottom right)
+        local xX, xY, xW, xH = getOptionsXButtonBounds()
+        love.graphics.setColor(0.8, 0.2, 0.2)
+        love.graphics.rectangle("fill", xX, xY, xW, xH, 6, 6)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", xX, xY, xW, xH, 6, 6)
+        -- Draw X
+        love.graphics.setLineWidth(3)
+        love.graphics.line(xX + 10, xY + 10, xX + xW - 10, xY + xH - 10)
+        love.graphics.line(xX + xW - 10, xY + 10, xX + 10, xY + xH - 10)
+        love.graphics.setLineWidth(1)
+
+        return  -- Don't draw anything else
+    end
+
     -- Draw sky background
-    love.graphics.setBackgroundColor(0.5, 0.7, 0.9)
+    love.graphics.setBackgroundColor(theme.sky[1], theme.sky[2], theme.sky[3])
 
     -- Draw target (bullseye pattern)
     love.graphics.setColor(1, 0, 0)  -- Red outer
@@ -729,8 +973,8 @@ function love.draw()
     love.graphics.setColor(1, 0, 0)  -- Red inner
     love.graphics.circle("fill", target.x, target.y, target.radius * 0.33)
 
-    -- Draw ground (brown)
-    love.graphics.setColor(0.4, 0.3, 0.2)
+    -- Draw ground (themed)
+    love.graphics.setColor(theme.ground[1], theme.ground[2], theme.ground[3])
     love.graphics.rectangle("fill", 0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
 
     -- Draw inventory UI over ground (leaving a few pixels of ground visible above)
@@ -738,8 +982,8 @@ function love.draw()
     local inventoryY = windowHeight - GROUND_HEIGHT + inventoryTopMargin
     local inventoryHeight = GROUND_HEIGHT - inventoryTopMargin
 
-    -- White background
-    love.graphics.setColor(1, 1, 1)
+    -- Inventory background (themed)
+    love.graphics.setColor(theme.inventoryBg[1], theme.inventoryBg[2], theme.inventoryBg[3])
     love.graphics.rectangle("fill", 0, inventoryY, windowWidth, inventoryHeight)
 
     -- Draw inventory slots
@@ -749,18 +993,18 @@ function love.draw()
 
             -- Skip drawing the slot being dragged (it will be drawn at mouse position)
             if not (draggingFromInventory and inventoryDragIndex == i) then
-                -- Slot background (light gray)
-                love.graphics.setColor(0.85, 0.85, 0.85)
+                -- Slot background (themed)
+                love.graphics.setColor(theme.inventorySlot[1], theme.inventorySlot[2], theme.inventorySlot[3])
                 love.graphics.rectangle("fill", slotX, slotY, slotW, slotH)
 
-                -- Block icon inside slot (black square, slightly smaller)
+                -- Block icon inside slot (themed)
                 local iconPadding = 4
-                love.graphics.setColor(0, 0, 0)
+                love.graphics.setColor(theme.block[1], theme.block[2], theme.block[3])
                 love.graphics.rectangle("fill", slotX + iconPadding, slotY + iconPadding,
                                         slotW - iconPadding * 2, slotH - iconPadding * 2)
 
-                -- Slot border
-                love.graphics.setColor(0.5, 0.5, 0.5)
+                -- Slot border (themed)
+                love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
                 love.graphics.rectangle("line", slotX, slotY, slotW, slotH)
             end
         end
@@ -770,7 +1014,7 @@ function love.draw()
             local font = love.graphics.getFont()
             local overflowText = "+" .. (#inventory - MAX_VISIBLE_SLOTS)
             local lastSlotX, lastSlotY = getInventorySlotBounds(MAX_VISIBLE_SLOTS)
-            love.graphics.setColor(0, 0, 0)
+            love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
             love.graphics.print(overflowText, lastSlotX + INVENTORY_SLOT_SIZE + 8,
                                lastSlotY + (INVENTORY_SLOT_SIZE - font:getHeight()) / 2)
         end
@@ -779,23 +1023,23 @@ function love.draw()
         local font = love.graphics.getFont()
         local emptyText = "Inventory Empty"
         local textWidth = font:getWidth(emptyText)
-        love.graphics.setColor(0.5, 0.5, 0.5)
+        love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
         love.graphics.print(emptyText, (windowWidth - textWidth) / 2,
                            inventoryY + (inventoryHeight - font:getHeight()) / 2)
     end
 
-    -- Draw building blocks (highlight selected block)
+    -- Draw building blocks (highlight selected block, themed)
     for _, block in ipairs(buildingBlocks) do
         local bx, by = block:getPosition()
         local halfSize = BLOCK_SIZE / 2
 
         -- Use different color for selected block
         if block == selectedBlock then
-            -- Highlighted color (bright golden yellow)
-            love.graphics.setColor(1, 0.85, 0.2)
+            -- Highlighted color (themed)
+            love.graphics.setColor(theme.blockSelected[1], theme.blockSelected[2], theme.blockSelected[3])
         else
-            -- Normal color (black)
-            love.graphics.setColor(0, 0, 0)
+            -- Normal color (themed)
+            love.graphics.setColor(theme.block[1], theme.block[2], theme.block[3])
         end
 
         love.graphics.rectangle("fill", bx - halfSize, by - halfSize, BLOCK_SIZE, BLOCK_SIZE)
@@ -815,17 +1059,17 @@ function love.draw()
         love.graphics.draw(pickupButton, buttonX, buttonY)
     end
 
-    -- Draw player (green)
-    love.graphics.setColor(0.2, 0.8, 0.2)
+    -- Draw player (themed)
+    love.graphics.setColor(theme.player[1], theme.player[2], theme.player[3])
     local px, py = player:getPosition()
     love.graphics.circle("fill", px, py, PLAYER_RADIUS)
 
-    -- Draw explosion radius indicator (subtle)
-    love.graphics.setColor(1, 0.5, 0, 0.2)
+    -- Draw explosion radius indicator (themed)
+    love.graphics.setColor(theme.explosionRadius[1], theme.explosionRadius[2], theme.explosionRadius[3], theme.explosionRadius[4])
     love.graphics.circle("line", px, py, EXPLOSION_RADIUS)
 
-    -- Draw instructions and stage indicator
-    love.graphics.setColor(1, 1, 1)
+    -- Draw instructions and stage indicator (themed text)
+    love.graphics.setColor(theme.textLight[1], theme.textLight[2], theme.textLight[3])
     love.graphics.print("Tap background: explode | R: restart | Drag blocks | Tap to select", 10, 10)
 
     -- Draw current stage name
@@ -834,6 +1078,15 @@ function love.draw()
     local stageText = stageName
     local stageTextWidth = font:getWidth(stageText)
     love.graphics.print(stageText, windowWidth - stageTextWidth - 10, 10)
+
+    -- Draw Options button (bottom right, above inventory)
+    local optX, optY, optW, optH = getOptionsButtonBounds()
+    love.graphics.setColor(theme.uiBackground[1], theme.uiBackground[2], theme.uiBackground[3])
+    love.graphics.rectangle("fill", optX, optY, optW, optH, 4, 4)
+    love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+    love.graphics.rectangle("line", optX, optY, optW, optH, 4, 4)
+    love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
+    love.graphics.print("Options", optX + 10, optY + optH / 2 - font:getHeight() / 2)
 
     -- Highlight dragged block
     if draggedBlock then
@@ -1057,6 +1310,9 @@ function isEmptySpace(px, py)
         if isPointInRestartButton(px, py) then return false end
     end
 
+    -- Over Options button
+    if isPointInOptionsButton(px, py) then return false end
+
     return true
 end
 
@@ -1078,6 +1334,45 @@ function handlePointerPressed(x, y)
             loadStage(1)
         end
         return  -- Block all other input while save screen is showing
+    end
+
+    -- Handle options screen input
+    if showOptionsScreen then
+        -- Check X button first
+        if isPointInOptionsXButton(x, y) then
+            showOptionsScreen = false
+            dropdownOpen = false
+            return
+        end
+
+        -- Check dropdown options (if open)
+        if dropdownOpen then
+            local optIndex = getDropdownOptionAtPoint(x, y)
+            if optIndex then
+                local options = {"light", "dark", "time"}
+                currentThemeSetting = options[optIndex]
+                saveThemeSetting()
+                dropdownOpen = false
+                return
+            end
+        end
+
+        -- Check dropdown header (toggle open/close)
+        if isPointInThemeDropdown(x, y) then
+            dropdownOpen = not dropdownOpen
+            return
+        end
+
+        -- Clicking elsewhere in options screen closes dropdown
+        dropdownOpen = false
+        return
+    end
+
+    -- Check for options button click
+    if isPointInOptionsButton(x, y) then
+        showOptionsScreen = true
+        dropdownOpen = false
+        return
     end
 
     -- Check for ending stage restart button

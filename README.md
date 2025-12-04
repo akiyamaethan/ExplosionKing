@@ -55,3 +55,20 @@ Surprisingly, we have been able to use the same tools we originally decided on a
 
 ## Next steps:
 Next up, We need to add another scene that the player can bring building blocks into using their inventory. This scene should be a copy of the first scene but with the target in the top left.
+
+# Devlog Entry - 12/3/2025
+
+## How we satisfied the software requirements - F2
+1 - For this milestone we continued using the same setup from F1. The game is still running in LÖVE and we kept the same rendering and physics libraries that we started with. Nothing major changed here and everything we originally committed to is still in place.
+
+2 - The game now has multiple scenes that the player can move between. We built a simple stage system so that when a player reaches the goal they can move on to the next area. Each stage feels like its own room with its own layout and objective, and the game transitions smoothly between them.
+
+3 - Players can now click on and interact with objects in the world. Blocks can be selected, moved around, and picked up. We made it so that clicking a block selects it and clicking again can let the player choose what to do with it. This gave the game a much more hands-on feeling and made the puzzle gameplay more active.
+
+4 - We added an inventory system that sticks with the player between scenes. You can pick up blocks and carry them into the next stage, then place them wherever you think you need them. This is important because some stages are only solvable if you bring the right blocks over from earlier ones. The inventory shows what you are holding and lets you drag things back out into the world whenever you want.
+
+5 - The physics puzzle from F1 is still the core of the game, but now it is spread out across different scenes. The challenge is to move your character using explosions and whatever blocks you decide to position. Each stage places the target in a different spot so you’ll need to think about how to shape the environment in a way that helps you launch yourself in the right direction. It’s still based entirely on physics and how you set up the environment.
+
+6 - Players succeed or fail based on their decisions. If you place your blocks poorly or trigger your explosions at the wrong time, you won’t reach the goal. If you think ahead and experiment, you’ll eventually figure out a working solution. Nothing here is random and the results are always consistent, so progress comes from learning how the system behaves and planning around that.
+
+7 - The game now reaches a final scene after the stages are complete. When the last goal is reached, the player enters an ending screen that wraps the experience up and gives the option to restart the game.

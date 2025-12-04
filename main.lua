@@ -1,6 +1,7 @@
 -- Explosion King - Explosion-Based Movement
 
 local wf = require 'libraries.windfield.windfield'
+local Input = require 'input'
 
 local world
 local player
@@ -22,6 +23,7 @@ local draggedBlock = nil
 local dragOffsetX, dragOffsetY = 0, 0
 local dragStartX, dragStartY = 0, 0  -- Track where mouse press started
 local DRAG_THRESHOLD = 5  -- Pixels of movement before it's considered a drag
+local pointerPressX, pointerPressY = 0, 0  -- Where pointer press started (for tap detection)
 
 -- Selection state
 local selectedBlock = nil
@@ -251,6 +253,10 @@ function love.load()
 
     -- Load the first stage
     loadStage(currentStage)
+
+    -- Register unified input callbacks
+    Input.onPointerPressed = function(x, y) handlePointerPressed(x, y) end
+    Input.onPointerReleased = function(x, y) handlePointerReleased(x, y) end
 end
 
 -- Load a stage by index (keeps inventory intact)
@@ -336,9 +342,9 @@ function love.update(dt)
         return
     end
 
-    -- Update dragged block position
+    -- Update dragged block position using Input abstraction
     if draggedBlock then
-        local mx, my = love.mouse.getPosition()
+        local mx, my = Input.getPosition()
         local newX, newY = mx + dragOffsetX, my + dragOffsetY
 
         -- Keep block on screen
@@ -349,6 +355,9 @@ function love.update(dt)
 
         draggedBlock:setPosition(newX, newY)
     end
+
+    -- Update Input module for mouse position (when not touching)
+    Input.updateFromMouse()
 end
 
 -- Perform explosion - query nearby objects and calculate repulsion force
@@ -516,7 +525,7 @@ function love.draw()
 
     -- Draw instructions and stage indicator
     love.graphics.setColor(1, 1, 1)
-    love.graphics.print("SPACE: explode | R: restart | Drag blocks | Click to pick up", 10, 10)
+    love.graphics.print("Tap background: explode | R: restart | Drag blocks | Tap to select", 10, 10)
 
     -- Draw current stage name
     local stageName = stages[currentStage] and stages[currentStage].name or "Unknown"
@@ -534,7 +543,7 @@ function love.draw()
 
     -- Draw ghost block preview when dragging from inventory
     if draggingFromInventory and inventoryDragIndex then
-        local mx, my = love.mouse.getPosition()
+        local mx, my = Input.getPosition()
         local halfSize = BLOCK_SIZE / 2
         local inventoryY = windowHeight - GROUND_HEIGHT + 5
 
@@ -627,122 +636,32 @@ function love.draw()
     end
 end
 
+-- Mouse input callbacks (delegate to Input abstraction)
 function love.mousepressed(x, y, button)
-    -- Check for ending stage restart button
-    if stages[currentStage] and stages[currentStage].type == "ending" then
-        if isPointInRestartButton(x, y) then
-            inventory = {}         -- clear inventory
-            loadStage(1)           -- restart game at stage 1
-        end
-        return
-    end
-    if button == 1 then  -- Left click
-        -- Check for Next Stage button click on victory screen
-        if gameWon then
-            if isPointInNextStageButton(x, y) then
-                nextStage()
-            end
-            return
-        end
-
-        -- First, check if clicking on the pickup button (takes priority)
-        if isPointInPickupButton(x, y) then
-            pickupSelectedBlock()
-            return
-        end
-
-        -- Check if clicking on an inventory slot (starts inventory drag)
-        local slotIndex = getInventorySlotAtPoint(x, y)
-        if slotIndex then
-            draggingFromInventory = true
-            inventoryDragIndex = slotIndex
-            inventoryDragX, inventoryDragY = x, y
-            return
-        end
-
-        -- Record start position for click vs drag detection
-        dragStartX, dragStartY = x, y
-
-        -- Check if clicking on a building block
-        for _, block in ipairs(buildingBlocks) do
-            if isPointInBlock(block, x, y) then
-                draggedBlock = block
-                local bx, by = block:getPosition()
-                dragOffsetX = bx - x
-                dragOffsetY = by - y
-                -- Disable collision with player while dragging
-                block:setCollisionClass('BlockDragging')
-                break
-            end
-        end
-
-        -- If clicked outside any block, deselect current selection
-        if not draggedBlock then
-            selectedBlock = nil
-        end
-    end
+    Input.handleMousePressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
-    if button == 1 then
-        -- Handle inventory drag release
-        if draggingFromInventory and inventoryDragIndex then
-            local windowHeight = love.graphics.getHeight()
-            local inventoryY = windowHeight - GROUND_HEIGHT + 5
-
-            -- Only spawn if released above the inventory area (in the game world)
-            if y < inventoryY then
-                spawnBlockFromInventory(inventoryDragIndex, x, y)
-            end
-
-            -- Reset inventory drag state
-            draggingFromInventory = false
-            inventoryDragIndex = nil
-            return
-        end
-
-        -- Handle world block drag release
-        if draggedBlock then
-            -- Calculate how far the mouse moved during this click
-            local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
-
-            -- If mouse barely moved, treat as a click (select the block)
-            if dragDist < DRAG_THRESHOLD then
-                -- Select this block
-                selectedBlock = draggedBlock
-                -- Re-enable collision since we didn't actually drag
-                draggedBlock:setCollisionClass('Block')
-                draggedBlock = nil
-                return
-            end
-
-            -- Otherwise, it was a drag - handle as before
-            local bx, by = draggedBlock:getPosition()
-            if overlapsPlayer(bx, by) then
-                -- Push block away from player
-                local px, py = player:getPosition()
-                local dx, dy = bx - px, by - py
-                local dist = math.sqrt(dx * dx + dy * dy)
-                if dist > 0 then
-                    dx, dy = dx / dist, dy / dist
-                else
-                    dx, dy = 0, -1  -- Default to pushing up
-                end
-                local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
-                draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
-            end
-            -- Re-enable collision with player
-            draggedBlock:setCollisionClass('Block')
-            draggedBlock = nil
-        end
-    end
+    Input.handleMouseReleased(x, y, button)
 end
 
+-- Touch input callbacks (delegate to Input abstraction)
+function love.touchpressed(id, x, y, dx, dy, pressure)
+    Input.handleTouchPressed(id, x, y)
+end
+
+function love.touchreleased(id, x, y, dx, dy, pressure)
+    Input.handleTouchReleased(id, x, y)
+end
+
+function love.touchmoved(id, x, y, dx, dy, pressure)
+    Input.handleTouchMoved(id, x, y)
+end
+
+-- Keyboard input (R for debug restart only, ESC to quit)
 function love.keypressed(key)
     if key == "escape" then
         love.event.quit()
-    elseif key == "space" then
-        performExplosion()
     elseif key == "r" then
         restartScene()
     end
@@ -799,6 +718,163 @@ function isPointInRestartButton(px, py)
 
     return px >= btnX and px <= btnX + btnW and
            py >= btnY and py <= btnY + btnH
+end
+
+-- Check if a point is on empty space (not on any interactive element)
+-- Used to trigger explosion when tapping background
+function isEmptySpace(px, py)
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local inventoryY = windowHeight - GROUND_HEIGHT + 5
+
+    -- Over inventory area
+    if py >= inventoryY then return false end
+
+    -- Over target
+    local targetDist = math.sqrt((px - target.x)^2 + (py - target.y)^2)
+    if targetDist < target.radius then return false end
+
+    -- Over player
+    local playerX, playerY = player:getPosition()
+    local playerDist = math.sqrt((px - playerX)^2 + (py - playerY)^2)
+    if playerDist < PLAYER_RADIUS then return false end
+
+    -- Over any block
+    for _, block in ipairs(buildingBlocks) do
+        if isPointInBlock(block, px, py) then return false end
+    end
+
+    -- Over pickup button
+    if isPointInPickupButton(px, py) then return false end
+
+    -- Over Next Stage button
+    if gameWon and isPointInNextStageButton(px, py) then return false end
+
+    -- Over Restart button (ending stage)
+    if stages[currentStage] and stages[currentStage].type == "ending" then
+        if isPointInRestartButton(px, py) then return false end
+    end
+
+    return true
+end
+
+-- Unified pointer pressed handler (called by Input abstraction)
+function handlePointerPressed(x, y)
+    -- Check for ending stage restart button
+    if stages[currentStage] and stages[currentStage].type == "ending" then
+        if isPointInRestartButton(x, y) then
+            inventory = {}
+            loadStage(1)
+        end
+        return
+    end
+
+    -- Check for Next Stage button click on victory screen
+    if gameWon then
+        if isPointInNextStageButton(x, y) then
+            nextStage()
+        end
+        return
+    end
+
+    -- First, check if clicking on the pickup button (takes priority)
+    if isPointInPickupButton(x, y) then
+        pickupSelectedBlock()
+        return
+    end
+
+    -- Check if clicking on an inventory slot (starts inventory drag)
+    local slotIndex = getInventorySlotAtPoint(x, y)
+    if slotIndex then
+        draggingFromInventory = true
+        inventoryDragIndex = slotIndex
+        inventoryDragX, inventoryDragY = x, y
+        return
+    end
+
+    -- Record start position for click vs drag detection
+    dragStartX, dragStartY = x, y
+    pointerPressX, pointerPressY = x, y
+
+    -- Check if clicking on a building block
+    for _, block in ipairs(buildingBlocks) do
+        if isPointInBlock(block, x, y) then
+            draggedBlock = block
+            local bx, by = block:getPosition()
+            dragOffsetX = bx - x
+            dragOffsetY = by - y
+            -- Disable collision with player while dragging
+            block:setCollisionClass('BlockDragging')
+            break
+        end
+    end
+
+    -- If clicked outside any block, deselect current selection
+    if not draggedBlock then
+        selectedBlock = nil
+    end
+end
+
+-- Unified pointer released handler (called by Input abstraction)
+function handlePointerReleased(x, y)
+    -- Handle inventory drag release
+    if draggingFromInventory and inventoryDragIndex then
+        local windowHeight = love.graphics.getHeight()
+        local inventoryY = windowHeight - GROUND_HEIGHT + 5
+
+        -- Only spawn if released above the inventory area (in the game world)
+        if y < inventoryY then
+            spawnBlockFromInventory(inventoryDragIndex, x, y)
+        end
+
+        -- Reset inventory drag state
+        draggingFromInventory = false
+        inventoryDragIndex = nil
+        return
+    end
+
+    -- Handle world block drag release
+    if draggedBlock then
+        -- Calculate how far the pointer moved during this press
+        local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
+
+        -- If pointer barely moved, treat as a tap (select the block)
+        if dragDist < DRAG_THRESHOLD then
+            -- Select this block
+            selectedBlock = draggedBlock
+            -- Re-enable collision since we didn't actually drag
+            draggedBlock:setCollisionClass('Block')
+            draggedBlock = nil
+            return
+        end
+
+        -- Otherwise, it was a drag - handle as before
+        local bx, by = draggedBlock:getPosition()
+        if overlapsPlayer(bx, by) then
+            -- Push block away from player
+            local px, py = player:getPosition()
+            local dx, dy = bx - px, by - py
+            local dist = math.sqrt(dx * dx + dy * dy)
+            if dist > 0 then
+                dx, dy = dx / dist, dy / dist
+            else
+                dx, dy = 0, -1  -- Default to pushing up
+            end
+            local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
+            draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
+        end
+        -- Re-enable collision with player
+        draggedBlock:setCollisionClass('Block')
+        draggedBlock = nil
+        return
+    end
+
+    -- Check for empty space tap -> trigger explosion
+    local tapDist = math.sqrt((x - pointerPressX)^2 + (y - pointerPressY)^2)
+    if tapDist < DRAG_THRESHOLD and isEmptySpace(x, y) then
+        if not gameWon then
+            performExplosion()
+        end
+    end
 end
 
 -- Pick up the selected block and add it to inventory

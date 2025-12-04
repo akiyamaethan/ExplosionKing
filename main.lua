@@ -30,9 +30,42 @@ local selectedBlock = nil
 local inventory = {}  -- Stores picked up blocks: {type = "square", size = BLOCK_SIZE}
 local pickupButton = nil  -- Will hold the pickup button image
 
+-- Inventory UI constants
+local INVENTORY_SLOT_SIZE = 32  -- Size of each inventory slot
+local INVENTORY_SLOT_PADDING = 8  -- Padding between slots
+local MAX_VISIBLE_SLOTS = 5  -- Maximum slots shown in UI
+
+-- Inventory drag state
+local draggingFromInventory = false
+local inventoryDragIndex = nil  -- Which slot we're dragging from
+local inventoryDragX, inventoryDragY = 0, 0  -- Current drag position
+
 -- Target state
 local target = {x = 0, y = 0, radius = 40}
 local gameWon = false
+
+-- Stage system
+local currentStage = 1
+local stages = {
+    {
+        name = "Stage 1",
+        targetPosition = "top-right",  -- Target in top right corner
+        blocks = {  -- Block positions as fractions of screen width
+            {x = 0.25, y = 50},
+            {x = 0.50, y = 50},
+            {x = 0.75, y = 50}
+        }
+    },
+    {
+        name = "Stage 2",
+        targetPosition = "top-left",  -- Target in top left corner
+        blocks = {
+            {x = 0.25, y = 50},
+            {x = 0.50, y = 50},
+            {x = 0.75, y = 50}
+        }
+    }
+}
 
 -- Get positions of objects within explosion radius
 function getObjectsInRadius(cx, cy, radius)
@@ -98,6 +131,74 @@ function isPointInPickupButton(px, py)
            py >= buttonY and py <= buttonY + buttonHeight
 end
 
+-- Get the bounding box for an inventory slot at given index (1-based)
+function getInventorySlotBounds(index)
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local inventoryY = windowHeight - GROUND_HEIGHT + 5  -- Same as inventoryTopMargin
+    local inventoryHeight = GROUND_HEIGHT - 5
+
+    local slotCount = math.min(#inventory, MAX_VISIBLE_SLOTS)
+    local totalWidth = slotCount * INVENTORY_SLOT_SIZE + (slotCount - 1) * INVENTORY_SLOT_PADDING
+    local startX = (windowWidth - totalWidth) / 2
+
+    local slotX = startX + (index - 1) * (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_PADDING)
+    local slotY = inventoryY + (inventoryHeight - INVENTORY_SLOT_SIZE) / 2
+
+    return slotX, slotY, INVENTORY_SLOT_SIZE, INVENTORY_SLOT_SIZE
+end
+
+-- Check if a point is inside an inventory slot, returns slot index or nil
+function getInventorySlotAtPoint(px, py)
+    if #inventory == 0 then return nil end
+
+    for i = 1, math.min(#inventory, MAX_VISIBLE_SLOTS) do
+        local slotX, slotY, slotW, slotH = getInventorySlotBounds(i)
+        if px >= slotX and px <= slotX + slotW and
+           py >= slotY and py <= slotY + slotH then
+            return i
+        end
+    end
+    return nil
+end
+
+-- Spawn a block from inventory at the given position
+function spawnBlockFromInventory(index, x, y)
+    if not inventory[index] then return false end
+
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local halfSize = BLOCK_SIZE / 2
+
+    -- Clamp position to valid area (not below ground, not off screen)
+    x = math.max(halfSize, math.min(windowWidth - halfSize, x))
+    y = math.max(halfSize, math.min(windowHeight - GROUND_HEIGHT - halfSize, y))
+
+    -- Don't spawn if overlapping player
+    if overlapsPlayer(x, y) then
+        local px, py = player:getPosition()
+        local dx, dy = x - px, y - py
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist > 0 then
+            dx, dy = dx / dist, dy / dist
+        else
+            dx, dy = 0, -1
+        end
+        local pushDist = PLAYER_RADIUS + halfSize + 15
+        x, y = px + dx * pushDist, py + dy * pushDist
+    end
+
+    -- Create the physics collider
+    local collider = world:newRectangleCollider(x - halfSize, y - halfSize, BLOCK_SIZE, BLOCK_SIZE)
+    collider:setType('static')
+    collider:setCollisionClass('Block')
+    table.insert(buildingBlocks, collider)
+
+    -- Remove from inventory
+    table.remove(inventory, index)
+
+    print("Block spawned from inventory! Remaining: " .. #inventory)
+    return true
+end
+
 function love.load()
     -- Load pickup button image
     pickupButton = love.graphics.newImage("pickupButton.png")
@@ -144,21 +245,60 @@ function love.load()
     player:setRestitution(0.3)
     player:setCollisionClass('Player')
 
-    -- Create 3 squares centered along the top of the screen
-    local topY = 50  -- Near top of screen
-    local spacing = windowWidth / 4  -- Divide screen into 4 parts, place at 1/4, 2/4, 3/4
+    -- Load the first stage
+    loadStage(currentStage)
+end
 
-    for i = 1, 3 do
-        local x = spacing * i
-        local collider = world:newRectangleCollider(x - BLOCK_SIZE/2, topY - BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE)
+-- Load a stage by index (keeps inventory intact)
+function loadStage(stageIndex)
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local stage = stages[stageIndex]
+
+    if not stage then
+        print("No more stages! You completed the game!")
+        return false
+    end
+
+    -- Reset game state (but NOT inventory)
+    gameWon = false
+    selectedBlock = nil
+    draggedBlock = nil
+    draggingFromInventory = false
+    inventoryDragIndex = nil
+
+    -- Destroy existing blocks
+    for _, block in ipairs(buildingBlocks) do
+        block:destroy()
+    end
+    buildingBlocks = {}
+
+    -- Create blocks for this stage
+    for _, blockDef in ipairs(stage.blocks) do
+        local x = windowWidth * blockDef.x
+        local y = blockDef.y
+        local collider = world:newRectangleCollider(x - BLOCK_SIZE/2, y - BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE)
         collider:setType('static')
         collider:setCollisionClass('Block')
         table.insert(buildingBlocks, collider)
     end
 
-    -- Position target in top right corner
-    target.x = windowWidth - target.radius - 20
-    target.y = target.radius + 20
+    -- Position target based on stage config
+    if stage.targetPosition == "top-right" then
+        target.x = windowWidth - target.radius - 20
+        target.y = target.radius + 20
+    elseif stage.targetPosition == "top-left" then
+        target.x = target.radius + 20
+        target.y = target.radius + 20
+    end
+
+    -- Reset player position and velocity
+    player:setPosition(windowWidth / 2, windowHeight - GROUND_HEIGHT - PLAYER_RADIUS)
+    player:setLinearVelocity(0, 0)
+    player:setAngularVelocity(0)
+
+    currentStage = stageIndex
+    print("Loaded " .. stage.name)
+    return true
 end
 
 function love.update(dt)
@@ -271,24 +411,47 @@ function love.draw()
     love.graphics.setColor(1, 1, 1)
     love.graphics.rectangle("fill", 0, inventoryY, windowWidth, inventoryHeight)
 
-    -- Draw centered content: black square icon + count
-    local iconSize = 24  -- Size of the square icon
-    local font = love.graphics.getFont()
-    local countText = tostring(#inventory)
-    local textWidth = font:getWidth(countText)
-    local spacing = 8  -- Space between icon and text
-    local totalContentWidth = iconSize + spacing + textWidth
+    -- Draw inventory slots
+    if #inventory > 0 then
+        for i = 1, math.min(#inventory, MAX_VISIBLE_SLOTS) do
+            local slotX, slotY, slotW, slotH = getInventorySlotBounds(i)
 
-    local contentX = (windowWidth - totalContentWidth) / 2
-    local contentY = inventoryY + (inventoryHeight - iconSize) / 2
+            -- Skip drawing the slot being dragged (it will be drawn at mouse position)
+            if not (draggingFromInventory and inventoryDragIndex == i) then
+                -- Slot background (light gray)
+                love.graphics.setColor(0.85, 0.85, 0.85)
+                love.graphics.rectangle("fill", slotX, slotY, slotW, slotH)
 
-    -- Black square icon
-    love.graphics.setColor(0, 0, 0)
-    love.graphics.rectangle("fill", contentX, contentY, iconSize, iconSize)
+                -- Block icon inside slot (black square, slightly smaller)
+                local iconPadding = 4
+                love.graphics.setColor(0, 0, 0)
+                love.graphics.rectangle("fill", slotX + iconPadding, slotY + iconPadding,
+                                        slotW - iconPadding * 2, slotH - iconPadding * 2)
 
-    -- Count text
-    local textY = inventoryY + (inventoryHeight - font:getHeight()) / 2
-    love.graphics.print(countText, contentX + iconSize + spacing, textY)
+                -- Slot border
+                love.graphics.setColor(0.5, 0.5, 0.5)
+                love.graphics.rectangle("line", slotX, slotY, slotW, slotH)
+            end
+        end
+
+        -- Show overflow indicator if more than MAX_VISIBLE_SLOTS
+        if #inventory > MAX_VISIBLE_SLOTS then
+            local font = love.graphics.getFont()
+            local overflowText = "+" .. (#inventory - MAX_VISIBLE_SLOTS)
+            local lastSlotX, lastSlotY = getInventorySlotBounds(MAX_VISIBLE_SLOTS)
+            love.graphics.setColor(0, 0, 0)
+            love.graphics.print(overflowText, lastSlotX + INVENTORY_SLOT_SIZE + 8,
+                               lastSlotY + (INVENTORY_SLOT_SIZE - font:getHeight()) / 2)
+        end
+    else
+        -- Empty inventory message
+        local font = love.graphics.getFont()
+        local emptyText = "Inventory Empty"
+        local textWidth = font:getWidth(emptyText)
+        love.graphics.setColor(0.5, 0.5, 0.5)
+        love.graphics.print(emptyText, (windowWidth - textWidth) / 2,
+                           inventoryY + (inventoryHeight - font:getHeight()) / 2)
+    end
 
     -- Draw building blocks (highlight selected block)
     for _, block in ipairs(buildingBlocks) do
@@ -330,15 +493,50 @@ function love.draw()
     love.graphics.setColor(1, 0.5, 0, 0.2)
     love.graphics.circle("line", px, py, EXPLOSION_RADIUS)
 
-    -- Draw instructions
+    -- Draw instructions and stage indicator
     love.graphics.setColor(1, 1, 1)
-    love.graphics.print("SPACE to explode | Drag blocks or Click to pick up", 10, 10)
+    love.graphics.print("SPACE: explode | R: restart | Drag blocks | Click to pick up", 10, 10)
+
+    -- Draw current stage name
+    local stageName = stages[currentStage] and stages[currentStage].name or "Unknown"
+    local font = love.graphics.getFont()
+    local stageText = stageName
+    local stageTextWidth = font:getWidth(stageText)
+    love.graphics.print(stageText, windowWidth - stageTextWidth - 10, 10)
 
     -- Highlight dragged block
     if draggedBlock then
         love.graphics.setColor(1, 1, 0, 0.3)
         local bx, by = draggedBlock:getPosition()
         love.graphics.circle("line", bx, by, BLOCK_SIZE / 2 + 5)
+    end
+
+    -- Draw ghost block preview when dragging from inventory
+    if draggingFromInventory and inventoryDragIndex then
+        local mx, my = love.mouse.getPosition()
+        local halfSize = BLOCK_SIZE / 2
+        local inventoryY = windowHeight - GROUND_HEIGHT + 5
+
+        -- Clamp preview position to valid spawn area
+        local previewX = math.max(halfSize, math.min(windowWidth - halfSize, mx))
+        local previewY = math.max(halfSize, math.min(inventoryY - halfSize, my))
+
+        -- Ghost block (semi-transparent)
+        love.graphics.setColor(0, 0, 0, 0.5)
+        love.graphics.rectangle("fill", previewX - halfSize, previewY - halfSize, BLOCK_SIZE, BLOCK_SIZE)
+
+        -- Highlight circle around ghost
+        love.graphics.setColor(1, 1, 0, 0.4)
+        love.graphics.circle("line", previewX, previewY, halfSize + 5)
+
+        -- Show "invalid" indicator if over inventory area
+        if my >= inventoryY then
+            love.graphics.setColor(1, 0.3, 0.3, 0.7)
+            love.graphics.setLineWidth(3)
+            love.graphics.line(previewX - 15, previewY - 15, previewX + 15, previewY + 15)
+            love.graphics.line(previewX + 15, previewY - 15, previewX - 15, previewY + 15)
+            love.graphics.setLineWidth(1)
+        end
     end
 
     -- Victory screen
@@ -353,16 +551,52 @@ function love.draw()
         local text = "VICTORY"
         local textWidth = font:getWidth(text)
         local textHeight = font:getHeight()
-        love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - textHeight/2)
+        love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - textHeight/2 - 30)
+
+        -- Next Stage button
+        local buttonText = "Next Stage"
+        local buttonTextWidth = font:getWidth(buttonText)
+        local buttonPadding = 16
+        local buttonWidth = buttonTextWidth + buttonPadding * 2
+        local buttonHeight = textHeight + buttonPadding
+        local buttonX = windowWidth/2 - buttonWidth/2
+        local buttonY = windowHeight/2 + 20
+
+        -- Button background
+        love.graphics.setColor(0.2, 0.6, 0.3)
+        love.graphics.rectangle("fill", buttonX, buttonY, buttonWidth, buttonHeight, 4, 4)
+
+        -- Button border
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", buttonX, buttonY, buttonWidth, buttonHeight, 4, 4)
+
+        -- Button text
+        love.graphics.print(buttonText, buttonX + buttonPadding, buttonY + buttonPadding/2)
     end
 end
 
 function love.mousepressed(x, y, button)
-    if gameWon then return end
     if button == 1 then  -- Left click
+        -- Check for Next Stage button click on victory screen
+        if gameWon then
+            if isPointInNextStageButton(x, y) then
+                nextStage()
+            end
+            return
+        end
+
         -- First, check if clicking on the pickup button (takes priority)
         if isPointInPickupButton(x, y) then
             pickupSelectedBlock()
+            return
+        end
+
+        -- Check if clicking on an inventory slot (starts inventory drag)
+        local slotIndex = getInventorySlotAtPoint(x, y)
+        if slotIndex then
+            draggingFromInventory = true
+            inventoryDragIndex = slotIndex
+            inventoryDragX, inventoryDragY = x, y
             return
         end
 
@@ -390,38 +624,57 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
-    if button == 1 and draggedBlock then
-        -- Calculate how far the mouse moved during this click
-        local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
+    if button == 1 then
+        -- Handle inventory drag release
+        if draggingFromInventory and inventoryDragIndex then
+            local windowHeight = love.graphics.getHeight()
+            local inventoryY = windowHeight - GROUND_HEIGHT + 5
 
-        -- If mouse barely moved, treat as a click (select the block)
-        if dragDist < DRAG_THRESHOLD then
-            -- Select this block
-            selectedBlock = draggedBlock
-            -- Re-enable collision since we didn't actually drag
-            draggedBlock:setCollisionClass('Block')
-            draggedBlock = nil
+            -- Only spawn if released above the inventory area (in the game world)
+            if y < inventoryY then
+                spawnBlockFromInventory(inventoryDragIndex, x, y)
+            end
+
+            -- Reset inventory drag state
+            draggingFromInventory = false
+            inventoryDragIndex = nil
             return
         end
 
-        -- Otherwise, it was a drag - handle as before
-        local bx, by = draggedBlock:getPosition()
-        if overlapsPlayer(bx, by) then
-            -- Push block away from player
-            local px, py = player:getPosition()
-            local dx, dy = bx - px, by - py
-            local dist = math.sqrt(dx * dx + dy * dy)
-            if dist > 0 then
-                dx, dy = dx / dist, dy / dist
-            else
-                dx, dy = 0, -1  -- Default to pushing up
+        -- Handle world block drag release
+        if draggedBlock then
+            -- Calculate how far the mouse moved during this click
+            local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
+
+            -- If mouse barely moved, treat as a click (select the block)
+            if dragDist < DRAG_THRESHOLD then
+                -- Select this block
+                selectedBlock = draggedBlock
+                -- Re-enable collision since we didn't actually drag
+                draggedBlock:setCollisionClass('Block')
+                draggedBlock = nil
+                return
             end
-            local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
-            draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
+
+            -- Otherwise, it was a drag - handle as before
+            local bx, by = draggedBlock:getPosition()
+            if overlapsPlayer(bx, by) then
+                -- Push block away from player
+                local px, py = player:getPosition()
+                local dx, dy = bx - px, by - py
+                local dist = math.sqrt(dx * dx + dy * dy)
+                if dist > 0 then
+                    dx, dy = dx / dist, dy / dist
+                else
+                    dx, dy = 0, -1  -- Default to pushing up
+                end
+                local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
+                draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
+            end
+            -- Re-enable collision with player
+            draggedBlock:setCollisionClass('Block')
+            draggedBlock = nil
         end
-        -- Re-enable collision with player
-        draggedBlock:setCollisionClass('Block')
-        draggedBlock = nil
     end
 end
 
@@ -430,7 +683,48 @@ function love.keypressed(key)
         love.event.quit()
     elseif key == "space" then
         performExplosion()
+    elseif key == "r" then
+        restartScene()
     end
+end
+
+-- Restart the current stage (clears inventory)
+function restartScene()
+    -- Clear inventory on restart
+    inventory = {}
+    -- Reload current stage
+    loadStage(currentStage)
+    print("Scene restarted!")
+end
+
+-- Advance to the next stage (keeps inventory)
+function nextStage()
+    if loadStage(currentStage + 1) then
+        print("Advanced to next stage!")
+    end
+end
+
+-- Get the Next Stage button bounds (for hit detection)
+function getNextStageButtonBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local font = love.graphics.getFont()
+    local buttonText = "Next Stage"
+    local buttonTextWidth = font:getWidth(buttonText)
+    local textHeight = font:getHeight()
+    local buttonPadding = 16
+    local buttonWidth = buttonTextWidth + buttonPadding * 2
+    local buttonHeight = textHeight + buttonPadding
+    local buttonX = windowWidth/2 - buttonWidth/2
+    local buttonY = windowHeight/2 + 20
+
+    return buttonX, buttonY, buttonWidth, buttonHeight
+end
+
+-- Check if a point is inside the Next Stage button
+function isPointInNextStageButton(px, py)
+    if not gameWon then return false end
+    local bx, by, bw, bh = getNextStageButtonBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
 -- Pick up the selected block and add it to inventory

@@ -50,3 +50,8 @@ What are you hoping to learn by approaching the project with the tools and mater
 
 ## Reflection
 Surprisingly, we have been able to use the same tools we originally decided on as of now. We had to add one more (windfield) to account for 3rd party physics, but other than that our stack has remained the same. We kind of fibbed our team roles and we have all been pretty much covering all the roles so maybe we can work on tightening that up for the next milestone. Game design-wise, our plans have changed drastically. We originally wanted to go with preset levels that put the player somewhere with a goal to reach elsewhere and just let them press space at the right time until they reached it. This was reminiscent of Geometry Dash. As you will see, for this milestone, we have pivoted to a sandbox sort of design. We now present the player with a pretty much emtpy level, but provide them shapes to place around the level and form their own solution to the problem. We think this will be much more interesting moving forward. 
+
+
+
+## Next steps:
+Next up, We need to add another scene that the player can bring building blocks into using their inventory. This scene should be a copy of the first scene but with the target in the top left.

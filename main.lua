@@ -108,7 +108,7 @@ local themes = {
         text = {0.9, 0.9, 0.9},           -- Light text
         textLight = {0.9, 0.9, 0.9},      -- Light text
         block = {0.4, 0.4, 0.5},          -- Gray blocks
-        blockSelected = {0.8, 0.6, 0.1},  -- Darker gold selected
+        blockSelected = {0.6, 0.6, 0.7},  -- Lighter gray selected (lighter than block)
         player = {0.1, 0.6, 0.1},         -- Darker green player
         explosionRadius = {1, 0.4, 0, 0.3}, -- Orange explosion indicator
         uiBackground = {0.15, 0.15, 0.2}, -- Dark UI background
@@ -144,6 +144,137 @@ function loadThemeSetting()
         local content = love.filesystem.read(THEME_SETTINGS_FILE)
         if content == "light" or content == "dark" or content == "time" then
             currentThemeSetting = content
+        end
+    end
+end
+
+-- Language/Localization system
+local LANGUAGE_SETTINGS_FILE = "language_settings.txt"
+local currentLanguage = "en"  -- "en", "zh", or "ar"
+local languageDropdownOpen = false
+
+-- Pickup button images for each language and theme (loaded in love.load)
+local pickupButtons = {
+    light = {},
+    dark = {}
+}
+
+-- Fonts for each language (loaded in love.load)
+local fonts = {}
+local FONT_SIZE = 14
+
+-- Translation strings
+local translations = {
+    en = {
+        instructions = "Tap background: explode | R: restart | Drag blocks | Tap to select",
+        inventoryEmpty = "Inventory Empty",
+        victory = "VICTORY",
+        nextStage = "Next Stage",
+        conclusiveEnding = "Conclusive Ending",
+        restartGame = "Restart Game",
+        saveDetected = "Save Detected, Load?",
+        options = "Options",
+        visualStyle = "Visual Style:",
+        language = "Language:",
+        light = "Light",
+        dark = "Dark",
+        timeBased = "Time-Based",
+        stage = "Stage",
+        english = "English",
+        chinese = "Chinese",
+        arabic = "Arabic",
+    },
+    zh = {
+        instructions = "点击背景: 爆炸 | R: 重启 | 拖动方块 | 点击选择",
+        inventoryEmpty = "背包为空",
+        victory = "胜利",
+        nextStage = "下一关",
+        conclusiveEnding = "游戏结束",
+        restartGame = "重新开始",
+        saveDetected = "检测到存档，是否加载？",
+        options = "选项",
+        visualStyle = "视觉风格：",
+        language = "语言：",
+        light = "明亮",
+        dark = "暗黑",
+        timeBased = "跟随时间",
+        stage = "关卡",
+        english = "英语",
+        chinese = "中文",
+        arabic = "阿拉伯语",
+    },
+    ar = {
+        instructions = "اضغط على الخلفية: انفجار | R: إعادة | اسحب الكتل | اضغط للتحديد",
+        inventoryEmpty = "المخزون فارغ",
+        victory = "فوز",
+        nextStage = "المرحلة التالية",
+        conclusiveEnding = "النهاية",
+        restartGame = "إعادة اللعبة",
+        saveDetected = "تم اكتشاف حفظ، هل تريد التحميل؟",
+        options = "خيارات",
+        visualStyle = "النمط المرئي:",
+        language = "اللغة:",
+        light = "فاتح",
+        dark = "داكن",
+        timeBased = "حسب الوقت",
+        stage = "مرحلة",
+        english = "الإنجليزية",
+        chinese = "الصينية",
+        arabic = "العربية",
+    }
+}
+
+-- Get translated text
+function getText(key)
+    local lang = translations[currentLanguage]
+    if lang and lang[key] then
+        return lang[key]
+    end
+    -- Fallback to English
+    return translations.en[key] or key
+end
+
+-- Get current pickup button based on language and theme
+function getCurrentPickupButton()
+    local theme = getCurrentTheme()
+    local themeKey = (theme == themes.dark) and "dark" or "light"
+    local themeButtons = pickupButtons[themeKey]
+    return themeButtons[currentLanguage] or themeButtons.en
+end
+
+-- Get current font based on language
+function getCurrentFont()
+    return fonts[currentLanguage] or fonts.en
+end
+
+-- Apply the current language font
+function applyCurrentFont()
+    local font = getCurrentFont()
+    if font then
+        love.graphics.setFont(font)
+    end
+end
+
+-- Get display name for language
+function getLanguageDisplayName(lang)
+    if lang == "en" then return getText("english")
+    elseif lang == "zh" then return getText("chinese")
+    elseif lang == "ar" then return getText("arabic")
+    end
+    return lang
+end
+
+-- Save language setting to file
+function saveLanguageSetting()
+    love.filesystem.write(LANGUAGE_SETTINGS_FILE, currentLanguage)
+end
+
+-- Load language setting from file
+function loadLanguageSetting()
+    if love.filesystem.getInfo(LANGUAGE_SETTINGS_FILE) then
+        local content = love.filesystem.read(LANGUAGE_SETTINGS_FILE)
+        if content == "en" or content == "zh" or content == "ar" then
+            currentLanguage = content
         end
     end
 end
@@ -408,11 +539,13 @@ end
 
 -- Check if a point is inside the pickup button (when a block is selected)
 function isPointInPickupButton(px, py)
-    if not selectedBlock or not pickupButton then return false end
+    if not selectedBlock then return false end
+    local currentButton = getCurrentPickupButton()
+    if not currentButton then return false end
 
     local bx, by = selectedBlock:getPosition()
-    local buttonWidth = pickupButton:getWidth()
-    local buttonHeight = pickupButton:getHeight()
+    local buttonWidth = currentButton:getWidth()
+    local buttonHeight = currentButton:getHeight()
     local buttonX = bx - buttonWidth / 2
     local buttonY = by - buttonHeight / 2
 
@@ -492,8 +625,27 @@ function love.load()
     -- Load theme setting
     loadThemeSetting()
 
-    -- Load pickup button image
-    pickupButton = love.graphics.newImage("pickupButton.png")
+    -- Load language setting
+    loadLanguageSetting()
+
+    -- Load pickup button images for all languages and themes
+    -- Light theme buttons
+    pickupButtons.light.en = love.graphics.newImage("pickupButton.png")
+    pickupButtons.light.zh = love.graphics.newImage("pickupButtonChinese.png")
+    pickupButtons.light.ar = love.graphics.newImage("pickupButtonArabic.png")
+    -- Dark theme buttons
+    pickupButtons.dark.en = love.graphics.newImage("pickupButton_dark.png")
+    pickupButtons.dark.zh = love.graphics.newImage("pickupButtonChinese_dark.png")
+    pickupButtons.dark.ar = love.graphics.newImage("pickupButtonArabic_dark.png")
+    pickupButton = pickupButtons.light.en  -- Legacy reference for compatibility
+
+    -- Load fonts for all languages
+    fonts.en = love.graphics.newFont(FONT_SIZE)  -- Default system font for English
+    fonts.zh = love.graphics.newFont("fonts/NotoSansSC-Regular.ttf", FONT_SIZE)  -- Chinese font
+    fonts.ar = love.graphics.newFont("fonts/NotoSansArabic-Regular.ttf", FONT_SIZE)  -- Arabic font
+
+    -- Set initial font based on loaded language
+    applyCurrentFont()
 
     -- Create physics world with gravity using Windfield
     world = wf.newWorld(0, 500, true)
@@ -759,7 +911,7 @@ end
 function getOptionsButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
-    local text = "Options"
+    local text = getText("options")
     local padding = 10
     local btnW = font:getWidth(text) + padding * 2
     local btnH = font:getHeight() + padding
@@ -779,7 +931,7 @@ function getOptionsXButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local btnSize = 40
     local panelW = 300
-    local panelH = 200
+    local panelH = 250  -- Increased for language dropdown
     local panelX = windowWidth / 2 - panelW / 2
     local panelY = windowHeight / 2 - panelH / 2
     return panelX + panelW - btnSize - 10, panelY + panelH - btnSize - 10, btnSize, btnSize
@@ -795,7 +947,7 @@ end
 function getThemeDropdownBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local panelW = 300
-    local panelH = 200
+    local panelH = 250  -- Increased for language dropdown
     local panelX = windowWidth / 2 - panelW / 2
     local panelY = windowHeight / 2 - panelH / 2
     local dropW = 150
@@ -830,16 +982,58 @@ function getDropdownOptionAtPoint(px, py)
     return nil
 end
 
--- Get display name for theme setting
+-- Get display name for theme setting (localized)
 function getThemeDisplayName(setting)
-    if setting == "light" then return "Light"
-    elseif setting == "dark" then return "Dark"
-    else return "Time-Based"
+    if setting == "light" then return getText("light")
+    elseif setting == "dark" then return getText("dark")
+    else return getText("timeBased")
     end
+end
+
+-- Language dropdown bounds (below theme dropdown)
+function getLanguageDropdownBounds()
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local panelW = 300
+    local panelH = 250  -- Increased panel height for language dropdown
+    local panelX = windowWidth / 2 - panelW / 2
+    local panelY = windowHeight / 2 - panelH / 2
+    local dropW = 150
+    local dropH = 30
+    local dropX = panelX + panelW / 2 - dropW / 2
+    local dropY = panelY + 155  -- Below theme dropdown
+    return dropX, dropY, dropW, dropH
+end
+
+-- Get language dropdown option bounds (when dropdown is open)
+function getLanguageDropdownOptionBounds(index)
+    local dropX, dropY, dropW, dropH = getLanguageDropdownBounds()
+    return dropX, dropY + dropH * index, dropW, dropH
+end
+
+-- Check if point is in language dropdown header
+function isPointInLanguageDropdown(px, py)
+    local bx, by, bw, bh = getLanguageDropdownBounds()
+    return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+-- Check if point is in a language dropdown option (returns option index or nil)
+function getLanguageDropdownOptionAtPoint(px, py)
+    if not languageDropdownOpen then return nil end
+    local options = {"en", "zh", "ar"}
+    for i, _ in ipairs(options) do
+        local ox, oy, ow, oh = getLanguageDropdownOptionBounds(i)
+        if px >= ox and px <= ox + ow and py >= oy and py <= oy + oh then
+            return i
+        end
+    end
+    return nil
 end
 
 function love.draw()
     local windowWidth, windowHeight = love.graphics.getDimensions()
+
+    -- Apply the current language font
+    applyCurrentFont()
 
     -- Draw save detection screen if active (blocks all other drawing)
     if showSaveDetectedScreen then
@@ -850,7 +1044,7 @@ function love.draw()
         -- Centered text
         love.graphics.setColor(1, 1, 1)
         local font = love.graphics.getFont()
-        local text = "Save Detected, Load?"
+        local text = getText("saveDetected")
         local textWidth = font:getWidth(text)
         love.graphics.print(text, windowWidth / 2 - textWidth / 2, windowHeight / 2 - 40)
 
@@ -888,7 +1082,7 @@ function love.draw()
 
         -- Options panel
         local panelW = 300
-        local panelH = 200
+        local panelH = 250  -- Increased for language dropdown
         local panelX = windowWidth / 2 - panelW / 2
         local panelY = windowHeight / 2 - panelH / 2
 
@@ -898,53 +1092,116 @@ function love.draw()
         love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
         love.graphics.rectangle("line", panelX, panelY, panelW, panelH, 10, 10)
 
-        -- Title
+        -- Title (localized)
         local font = love.graphics.getFont()
         love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
-        local title = "Options"
+        local title = getText("options")
         local titleWidth = font:getWidth(title)
         love.graphics.print(title, panelX + panelW / 2 - titleWidth / 2, panelY + 20)
 
-        -- Visual Style label
-        local label = "Visual Style:"
-        love.graphics.print(label, panelX + panelW / 2 - font:getWidth(label) / 2, panelY + 55)
+        -- Helper function to draw Visual Style dropdown
+        local function drawThemeDropdown(drawOptions)
+            -- Visual Style label (localized)
+            love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
+            local label = getText("visualStyle")
+            love.graphics.print(label, panelX + panelW / 2 - font:getWidth(label) / 2, panelY + 55)
 
-        -- Dropdown
-        local dropX, dropY, dropW, dropH = getThemeDropdownBounds()
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.rectangle("fill", dropX, dropY, dropW, dropH, 4, 4)
-        love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
-        love.graphics.rectangle("line", dropX, dropY, dropW, dropH, 4, 4)
+            -- Theme Dropdown header
+            local dropX, dropY, dropW, dropH = getThemeDropdownBounds()
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.rectangle("fill", dropX, dropY, dropW, dropH, 4, 4)
+            love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+            love.graphics.rectangle("line", dropX, dropY, dropW, dropH, 4, 4)
 
-        -- Current selection text
-        love.graphics.setColor(0, 0, 0)
-        local selText = getThemeDisplayName(currentThemeSetting)
-        love.graphics.print(selText, dropX + 10, dropY + dropH / 2 - font:getHeight() / 2)
+            -- Current theme selection text
+            love.graphics.setColor(0, 0, 0)
+            local selText = getThemeDisplayName(currentThemeSetting)
+            love.graphics.print(selText, dropX + 10, dropY + dropH / 2 - font:getHeight() / 2)
 
-        -- Dropdown arrow
-        love.graphics.polygon("fill",
-            dropX + dropW - 20, dropY + dropH / 2 - 4,
-            dropX + dropW - 10, dropY + dropH / 2 - 4,
-            dropX + dropW - 15, dropY + dropH / 2 + 4
-        )
+            -- Theme dropdown arrow
+            love.graphics.polygon("fill",
+                dropX + dropW - 20, dropY + dropH / 2 - 4,
+                dropX + dropW - 10, dropY + dropH / 2 - 4,
+                dropX + dropW - 15, dropY + dropH / 2 + 4
+            )
 
-        -- Dropdown options (if open)
-        if dropdownOpen then
-            local options = {"light", "dark", "time"}
-            for i, opt in ipairs(options) do
-                local ox, oy, ow, oh = getThemeDropdownOptionBounds(i)
-                -- Highlight if current selection
-                if opt == currentThemeSetting then
-                    love.graphics.setColor(0.8, 0.9, 1)
-                else
-                    love.graphics.setColor(1, 1, 1)
+            -- Theme dropdown options (if open and requested)
+            if drawOptions and dropdownOpen then
+                local options = {"light", "dark", "time"}
+                for i, opt in ipairs(options) do
+                    local ox, oy, ow, oh = getThemeDropdownOptionBounds(i)
+                    if opt == currentThemeSetting then
+                        love.graphics.setColor(0.8, 0.9, 1)
+                    else
+                        love.graphics.setColor(1, 1, 1)
+                    end
+                    love.graphics.rectangle("fill", ox, oy, ow, oh)
+                    love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+                    love.graphics.rectangle("line", ox, oy, ow, oh)
+                    love.graphics.setColor(0, 0, 0)
+                    love.graphics.print(getThemeDisplayName(opt), ox + 10, oy + oh / 2 - font:getHeight() / 2)
                 end
-                love.graphics.rectangle("fill", ox, oy, ow, oh)
-                love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
-                love.graphics.rectangle("line", ox, oy, ow, oh)
-                love.graphics.setColor(0, 0, 0)
-                love.graphics.print(getThemeDisplayName(opt), ox + 10, oy + oh / 2 - font:getHeight() / 2)
             end
+        end
+
+        -- Helper function to draw Language dropdown
+        local function drawLanguageDropdown(drawOptions)
+            -- Language label (localized)
+            love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
+            local langLabel = getText("language")
+            love.graphics.print(langLabel, panelX + panelW / 2 - font:getWidth(langLabel) / 2, panelY + 130)
+
+            -- Language Dropdown header
+            local langDropX, langDropY, langDropW, langDropH = getLanguageDropdownBounds()
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.rectangle("fill", langDropX, langDropY, langDropW, langDropH, 4, 4)
+            love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+            love.graphics.rectangle("line", langDropX, langDropY, langDropW, langDropH, 4, 4)
+
+            -- Current language selection text
+            love.graphics.setColor(0, 0, 0)
+            local langSelText = getLanguageDisplayName(currentLanguage)
+            love.graphics.print(langSelText, langDropX + 10, langDropY + langDropH / 2 - font:getHeight() / 2)
+
+            -- Language dropdown arrow
+            love.graphics.polygon("fill",
+                langDropX + langDropW - 20, langDropY + langDropH / 2 - 4,
+                langDropX + langDropW - 10, langDropY + langDropH / 2 - 4,
+                langDropX + langDropW - 15, langDropY + langDropH / 2 + 4
+            )
+
+            -- Language dropdown options (if open and requested)
+            if drawOptions and languageDropdownOpen then
+                local langOptions = {"en", "zh", "ar"}
+                for i, lang in ipairs(langOptions) do
+                    local ox, oy, ow, oh = getLanguageDropdownOptionBounds(i)
+                    if lang == currentLanguage then
+                        love.graphics.setColor(0.8, 0.9, 1)
+                    else
+                        love.graphics.setColor(1, 1, 1)
+                    end
+                    love.graphics.rectangle("fill", ox, oy, ow, oh)
+                    love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
+                    love.graphics.rectangle("line", ox, oy, ow, oh)
+                    love.graphics.setColor(0, 0, 0)
+                    love.graphics.print(getLanguageDisplayName(lang), ox + 10, oy + oh / 2 - font:getHeight() / 2)
+                end
+            end
+        end
+
+        -- Draw dropdowns in correct order (active dropdown drawn last, on top)
+        if dropdownOpen then
+            -- Theme dropdown is open, draw language first, then theme on top
+            drawLanguageDropdown(false)
+            drawThemeDropdown(true)
+        elseif languageDropdownOpen then
+            -- Language dropdown is open, draw theme first, then language on top
+            drawThemeDropdown(false)
+            drawLanguageDropdown(true)
+        else
+            -- Neither open, draw in normal order
+            drawThemeDropdown(false)
+            drawLanguageDropdown(false)
         end
 
         -- X button (red, bottom right)
@@ -1021,7 +1278,7 @@ function love.draw()
     else
         -- Empty inventory message
         local font = love.graphics.getFont()
-        local emptyText = "Inventory Empty"
+        local emptyText = getText("inventoryEmpty")
         local textWidth = font:getWidth(emptyText)
         love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
         love.graphics.print(emptyText, (windowWidth - textWidth) / 2,
@@ -1048,15 +1305,16 @@ function love.draw()
     -- Draw pickup button centered on selected block
     if selectedBlock then
         local bx, by = selectedBlock:getPosition()
+        local currentButton = getCurrentPickupButton()
 
         -- Center the button on the block
-        local buttonWidth = pickupButton:getWidth()
-        local buttonHeight = pickupButton:getHeight()
+        local buttonWidth = currentButton:getWidth()
+        local buttonHeight = currentButton:getHeight()
         local buttonX = bx - buttonWidth / 2
         local buttonY = by - buttonHeight / 2
 
         love.graphics.setColor(1, 1, 1)
-        love.graphics.draw(pickupButton, buttonX, buttonY)
+        love.graphics.draw(currentButton, buttonX, buttonY)
     end
 
     -- Draw player (themed)
@@ -1070,7 +1328,7 @@ function love.draw()
 
     -- Draw instructions and stage indicator (themed text)
     love.graphics.setColor(theme.textLight[1], theme.textLight[2], theme.textLight[3])
-    love.graphics.print("Tap background: explode | R: restart | Drag blocks | Tap to select", 10, 10)
+    love.graphics.print(getText("instructions"), 10, 10)
 
     -- Draw current stage name
     local stageName = stages[currentStage] and stages[currentStage].name or "Unknown"
@@ -1086,7 +1344,7 @@ function love.draw()
     love.graphics.setColor(theme.uiBorder[1], theme.uiBorder[2], theme.uiBorder[3])
     love.graphics.rectangle("line", optX, optY, optW, optH, 4, 4)
     love.graphics.setColor(theme.text[1], theme.text[2], theme.text[3])
-    love.graphics.print("Options", optX + 10, optY + optH / 2 - font:getHeight() / 2)
+    love.graphics.print(getText("options"), optX + 10, optY + optH / 2 - font:getHeight() / 2)
 
     -- Highlight dragged block
     if draggedBlock then
@@ -1132,13 +1390,13 @@ function love.draw()
         -- Victory text
         love.graphics.setColor(1, 1, 1)
         local font = love.graphics.getFont()
-        local text = "VICTORY"
+        local text = getText("victory")
         local textWidth = font:getWidth(text)
         local textHeight = font:getHeight()
         love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - textHeight/2 - 30)
 
         -- Next Stage button
-        local buttonText = "Next Stage"
+        local buttonText = getText("nextStage")
         local buttonTextWidth = font:getWidth(buttonText)
         local buttonPadding = 16
         local buttonWidth = buttonTextWidth + buttonPadding * 2
@@ -1166,12 +1424,12 @@ function love.draw()
         -- Title text
         love.graphics.setColor(1, 1, 1)
         local font = love.graphics.getFont()
-        local text = "Conclusive Ending"
+        local text = getText("conclusiveEnding")
         local textWidth = font:getWidth(text)
         love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - 80)
 
         -- Restart button
-        local buttonText = "Restart Game"
+        local buttonText = getText("restartGame")
         local btnW = font:getWidth(buttonText) + 32
         local btnH = font:getHeight() + 20
         local btnX = windowWidth/2 - btnW/2
@@ -1243,7 +1501,7 @@ end
 function getNextStageButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
-    local buttonText = "Next Stage"
+    local buttonText = getText("nextStage")
     local buttonTextWidth = font:getWidth(buttonText)
     local textHeight = font:getHeight()
     local buttonPadding = 16
@@ -1266,7 +1524,7 @@ function isPointInRestartButton(px, py)
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
 
-    local buttonText = "Restart Game"
+    local buttonText = getText("restartGame")
     local btnW = font:getWidth(buttonText) + 32
     local btnH = font:getHeight() + 20
     local btnX = windowWidth/2 - btnW/2
@@ -1342,10 +1600,11 @@ function handlePointerPressed(x, y)
         if isPointInOptionsXButton(x, y) then
             showOptionsScreen = false
             dropdownOpen = false
+            languageDropdownOpen = false
             return
         end
 
-        -- Check dropdown options (if open)
+        -- Check theme dropdown options (if open)
         if dropdownOpen then
             local optIndex = getDropdownOptionAtPoint(x, y)
             if optIndex then
@@ -1357,14 +1616,36 @@ function handlePointerPressed(x, y)
             end
         end
 
-        -- Check dropdown header (toggle open/close)
+        -- Check language dropdown options (if open)
+        if languageDropdownOpen then
+            local langOptIndex = getLanguageDropdownOptionAtPoint(x, y)
+            if langOptIndex then
+                local langOptions = {"en", "zh", "ar"}
+                currentLanguage = langOptions[langOptIndex]
+                saveLanguageSetting()
+                applyCurrentFont()  -- Apply new font immediately
+                languageDropdownOpen = false
+                return
+            end
+        end
+
+        -- Check theme dropdown header (toggle open/close)
         if isPointInThemeDropdown(x, y) then
             dropdownOpen = not dropdownOpen
+            languageDropdownOpen = false  -- Close other dropdown
             return
         end
 
-        -- Clicking elsewhere in options screen closes dropdown
+        -- Check language dropdown header (toggle open/close)
+        if isPointInLanguageDropdown(x, y) then
+            languageDropdownOpen = not languageDropdownOpen
+            dropdownOpen = false  -- Close other dropdown
+            return
+        end
+
+        -- Clicking elsewhere in options screen closes both dropdowns
         dropdownOpen = false
+        languageDropdownOpen = false
         return
     end
 

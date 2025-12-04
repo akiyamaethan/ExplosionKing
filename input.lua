@@ -1,19 +1,26 @@
--- input.lua - Unified Input Abstraction Layer
--- Treats mouse and touch as a single "pointer" concept
+-- input.lua - unified input abstraction layer
+-- treats mouse and touch as a single "pointer" concept
 
 local Input = {}
 
--- Internal state
-local activePointerId = nil      -- nil for mouse, touch ID for touch
+----------------------
+-- Internal State --
+----------------------
+local activePointerId = nil  -- nil for mouse, touch ID for touch
 local pointerX, pointerY = 0, 0
 local pointerDown = false
-local pointerSource = nil        -- "mouse" or "touch"
+local pointerSource = nil  -- "mouse" or "touch"
 
--- Callbacks (set by main.lua)
-Input.onPointerPressed = nil     -- function(x, y)
-Input.onPointerReleased = nil    -- function(x, y)
+------------------
+-- Callbacks --
+------------------
+Input.onPointerPressed = nil   -- function(x, y)
+Input.onPointerReleased = nil  -- function(x, y)
 
--- Public API
+------------------
+-- Public API --
+------------------
+
 function Input.getPosition()
     return pointerX, pointerY
 end
@@ -26,7 +33,10 @@ function Input.getSource()
     return pointerSource
 end
 
--- Mouse handlers
+---------------------
+-- Mouse Handlers --
+---------------------
+
 function Input.handleMousePressed(x, y, button)
     if button ~= 1 or pointerDown then return false end
     activePointerId = nil
@@ -45,9 +55,12 @@ function Input.handleMouseReleased(x, y, button)
     return true
 end
 
--- Touch handlers
+---------------------
+-- Touch Handlers --
+---------------------
+
 function Input.handleTouchPressed(id, x, y)
-    if pointerDown then return false end  -- Already tracking a pointer
+    if pointerDown then return false end
     activePointerId = id
     pointerSource = "touch"
     pointerX, pointerY = x, y
@@ -71,7 +84,11 @@ function Input.handleTouchMoved(id, x, y)
     return true
 end
 
--- Update pointer position from mouse (for when no active touch)
+---------------------
+-- Mouse Fallback --
+---------------------
+
+-- updates pointer position from mouse when no active touch
 function Input.updateFromMouse()
     if pointerSource == "mouse" or not pointerDown then
         pointerX, pointerY = love.mouse.getPosition()

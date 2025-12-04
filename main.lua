@@ -1,130 +1,164 @@
 -- Explosion King - Explosion-Based Movement
 
+--------------------
+-- Dependencies --
+--------------------
 local wf = require 'libraries.windfield.windfield'
 local Input = require 'input'
 
+----------------------
+-- Physics Objects --
+----------------------
 local world
 local player
 local ground
-local walls = {}  -- Screen boundary walls
-local buildingBlocks = {}  -- Draggable shapes
+local walls = {}  -- screen boundary walls
+local buildingBlocks = {}  -- draggable shapes
 
--- Constants
+-------------------------
+-- Player Constants --
+-------------------------
 local PLAYER_RADIUS = 30
-local BLOCK_SIZE = PLAYER_RADIUS * 2  -- Roughly player size
+local BLOCK_SIZE = PLAYER_RADIUS * 2  -- roughly player size
 local GROUND_HEIGHT = 50
 
--- Explosion constants
+---------------------------
+-- Explosion Constants --
+---------------------------
 local EXPLOSION_RADIUS = PLAYER_RADIUS * 3  -- 3x player radius
-local EXPLOSION_FORCE = 1600  -- Base force, tuned to launch ~1/3 screen height from ground
+local EXPLOSION_FORCE = 1600  -- tuned to launch ~1/3 screen height from ground
 
--- Drag and drop state
+---------------------------
+-- Drag and Drop State --
+---------------------------
 local draggedBlock = nil
 local dragOffsetX, dragOffsetY = 0, 0
-local dragStartX, dragStartY = 0, 0  -- Track where mouse press started
-local DRAG_THRESHOLD = 5  -- Pixels of movement before it's considered a drag
-local pointerPressX, pointerPressY = 0, 0  -- Where pointer press started (for tap detection)
+local dragStartX, dragStartY = 0, 0  -- track where mouse press started
+local DRAG_THRESHOLD = 5  -- pixels of movement before it's considered a drag
+local pointerPressX, pointerPressY = 0, 0  -- for tap detection
 
--- Selection state
+-----------------------
+-- Selection State --
+-----------------------
 local selectedBlock = nil
 
--- Inventory system
-local inventory = {}  -- Stores picked up blocks: {type = "square", size = BLOCK_SIZE}
-local pickupButton = nil  -- Will hold the pickup button image
+------------------------
+-- Inventory System --
+------------------------
+local inventory = {}  -- stores picked up blocks: {type = "square", size = BLOCK_SIZE}
+local pickupButton = nil  -- will hold the pickup button image
 
--- Inventory UI constants
-local INVENTORY_SLOT_SIZE = 32  -- Size of each inventory slot
-local INVENTORY_SLOT_PADDING = 8  -- Padding between slots
-local MAX_VISIBLE_SLOTS = 5  -- Maximum slots shown in UI
+----------------------------
+-- Inventory UI Constants --
+----------------------------
+local INVENTORY_SLOT_SIZE = 32
+local INVENTORY_SLOT_PADDING = 8
+local MAX_VISIBLE_SLOTS = 5
 
--- Inventory drag state
+---------------------------
+-- Inventory Drag State --
+---------------------------
 local draggingFromInventory = false
-local inventoryDragIndex = nil  -- Which slot we're dragging from
-local inventoryDragX, inventoryDragY = 0, 0  -- Current drag position
+local inventoryDragIndex = nil  -- which slot we're dragging from
+local inventoryDragX, inventoryDragY = 0, 0
 
--- Target state
+----------------------
+-- Target and Win --
+----------------------
 local target = {x = 0, y = 0, radius = 40}
 local gameWon = false
 
--- Stage system
+--------------------
+-- Stage System --
+--------------------
 local currentStage = 1
 local stages = {
     {
         name = "Stage 1",
-        targetPosition = "top-right",  -- Target in top right corner
-        blocks = {  -- Block positions as fractions of screen width
-            {x = 0.25, y = 50},
-            {x = 0.50, y = 50},
-            {x = 0.75, y = 50}
-        }
-    },
-    {
-        name = "Stage 2",
-        targetPosition = "top-left",  -- Target in top left corner
+        targetPosition = "top-right",
         blocks = {
             {x = 0.25, y = 50},
             {x = 0.50, y = 50},
-            {x = 0.75, y = 50}
-        }
+            {x = 0.75, y = 50},
+        },
+    },
+    {
+        name = "Stage 2",
+        targetPosition = "top-left",
+        blocks = {
+            {x = 0.25, y = 50},
+            {x = 0.50, y = 50},
+            {x = 0.75, y = 50},
+        },
     },
     {
         name = "Stage 3",
-        type = "ending"  -- special stage type
-    }
+        type = "ending",
+    },
 }
 
--- Save system state
+--------------------
+-- Save System --
+--------------------
 local SAVE_FILE = "autosave.json"
-local showSaveDetectedScreen = false  -- Show save detection UI on startup
-local saveExists = false  -- Whether a save file was detected
+local showSaveDetectedScreen = false
+local saveExists = false
 
--- Theme/Visual Style system
+--------------------
+-- Theme System --
+--------------------
 local THEME_SETTINGS_FILE = "theme_settings.txt"
 local currentThemeSetting = "time"  -- "light", "dark", or "time"
 local showOptionsScreen = false
 local dropdownOpen = false
 
--- Theme color definitions
+----------------------------
+-- Theme Color Definitions --
+----------------------------
 local themes = {
     light = {
-        sky = {0.5, 0.7, 0.9},           -- Light blue sky
-        ground = {0.4, 0.3, 0.2},         -- Brown ground
-        inventoryBg = {1, 1, 1},          -- White inventory
-        inventorySlot = {0.85, 0.85, 0.85}, -- Light gray slots
-        text = {0, 0, 0},                 -- Black text
-        textLight = {1, 1, 1},            -- White text (for dark backgrounds)
-        block = {0, 0, 0},                -- Black blocks
-        blockSelected = {1, 0.85, 0.2},   -- Golden yellow selected
-        player = {0.2, 0.8, 0.2},         -- Green player
-        explosionRadius = {1, 0.5, 0, 0.2}, -- Orange explosion indicator
-        uiBackground = {0.9, 0.9, 0.9},   -- Light UI background
-        uiBorder = {0.5, 0.5, 0.5},       -- Gray border
+        sky = {0.5, 0.7, 0.9},
+        ground = {0.4, 0.3, 0.2},
+        inventoryBg = {1, 1, 1},
+        inventorySlot = {0.85, 0.85, 0.85},
+        text = {0, 0, 0},
+        textLight = {1, 1, 1},
+        block = {0, 0, 0},
+        blockSelected = {1, 0.85, 0.2},
+        player = {0.2, 0.8, 0.2},
+        explosionRadius = {1, 0.5, 0, 0.2},
+        uiBackground = {0.9, 0.9, 0.9},
+        uiBorder = {0.5, 0.5, 0.5},
     },
     dark = {
-        sky = {0.1, 0.1, 0.2},            -- Dark night sky
-        ground = {0.2, 0.15, 0.1},        -- Darker ground
-        inventoryBg = {0.2, 0.2, 0.25},   -- Dark inventory
-        inventorySlot = {0.3, 0.3, 0.35}, -- Dark slots
-        text = {0.9, 0.9, 0.9},           -- Light text
-        textLight = {0.9, 0.9, 0.9},      -- Light text
-        block = {0.4, 0.4, 0.5},          -- Gray blocks
-        blockSelected = {0.6, 0.6, 0.7},  -- Lighter gray selected (lighter than block)
-        player = {0.1, 0.6, 0.1},         -- Darker green player
-        explosionRadius = {1, 0.4, 0, 0.3}, -- Orange explosion indicator
-        uiBackground = {0.15, 0.15, 0.2}, -- Dark UI background
-        uiBorder = {0.4, 0.4, 0.5},       -- Dark border
-    }
+        sky = {0.1, 0.1, 0.2},
+        ground = {0.2, 0.15, 0.1},
+        inventoryBg = {0.2, 0.2, 0.25},
+        inventorySlot = {0.3, 0.3, 0.35},
+        text = {0.9, 0.9, 0.9},
+        textLight = {0.9, 0.9, 0.9},
+        block = {0.4, 0.4, 0.5},
+        blockSelected = {0.6, 0.6, 0.7},
+        player = {0.1, 0.6, 0.1},
+        explosionRadius = {1, 0.4, 0, 0.3},
+        uiBackground = {0.15, 0.15, 0.2},
+        uiBorder = {0.4, 0.4, 0.5},
+    },
 }
 
--- Get the current effective theme based on setting
-function getCurrentTheme()
+--------------------------
+-- Theme Helper Functions --
+--------------------------
+
+-- returns current theme colors based on setting
+local function getCurrentTheme()
     if currentThemeSetting == "light" then
         return themes.light
     elseif currentThemeSetting == "dark" then
         return themes.dark
-    else -- "time" - time-based
+    else
+        -- time-based: day 6am-6pm, night otherwise
         local hour = tonumber(os.date("%H"))
-        -- Day: 6 AM to 6 PM (6-18), Night: 6 PM to 6 AM
         if hour >= 6 and hour < 18 then
             return themes.light
         else
@@ -133,13 +167,11 @@ function getCurrentTheme()
     end
 end
 
--- Save theme setting to file
-function saveThemeSetting()
+local function saveThemeSetting()
     love.filesystem.write(THEME_SETTINGS_FILE, currentThemeSetting)
 end
 
--- Load theme setting from file
-function loadThemeSetting()
+local function loadThemeSetting()
     if love.filesystem.getInfo(THEME_SETTINGS_FILE) then
         local content = love.filesystem.read(THEME_SETTINGS_FILE)
         if content == "light" or content == "dark" or content == "time" then
@@ -148,22 +180,26 @@ function loadThemeSetting()
     end
 end
 
--- Language/Localization system
+---------------------------
+-- Localization System --
+---------------------------
 local LANGUAGE_SETTINGS_FILE = "language_settings.txt"
 local currentLanguage = "en"  -- "en", "zh", or "ar"
 local languageDropdownOpen = false
 
--- Pickup button images for each language and theme (loaded in love.load)
+-- pickup button images for each language and theme (loaded in love.load)
 local pickupButtons = {
     light = {},
-    dark = {}
+    dark = {},
 }
 
--- Fonts for each language (loaded in love.load)
+-- fonts for each language (loaded in love.load)
 local fonts = {}
 local FONT_SIZE = 14
 
--- Translation strings
+---------------------------
+-- Translation Strings --
+---------------------------
 local translations = {
     en = {
         instructions = "Tap background: explode | R: restart | Drag blocks | Tap to select",
@@ -221,42 +257,41 @@ local translations = {
         english = "الإنجليزية",
         chinese = "الصينية",
         arabic = "العربية",
-    }
+    },
 }
 
--- Get translated text
-function getText(key)
+-------------------------------
+-- Localization Helpers --
+-------------------------------
+
+local function getText(key)
     local lang = translations[currentLanguage]
     if lang and lang[key] then
         return lang[key]
     end
-    -- Fallback to English
+    -- fallback to english
     return translations.en[key] or key
 end
 
--- Get current pickup button based on language and theme
-function getCurrentPickupButton()
+local function getCurrentPickupButton()
     local theme = getCurrentTheme()
     local themeKey = (theme == themes.dark) and "dark" or "light"
     local themeButtons = pickupButtons[themeKey]
     return themeButtons[currentLanguage] or themeButtons.en
 end
 
--- Get current font based on language
-function getCurrentFont()
+local function getCurrentFont()
     return fonts[currentLanguage] or fonts.en
 end
 
--- Apply the current language font
-function applyCurrentFont()
+local function applyCurrentFont()
     local font = getCurrentFont()
     if font then
         love.graphics.setFont(font)
     end
 end
 
--- Get display name for language
-function getLanguageDisplayName(lang)
+local function getLanguageDisplayName(lang)
     if lang == "en" then return getText("english")
     elseif lang == "zh" then return getText("chinese")
     elseif lang == "ar" then return getText("arabic")
@@ -264,13 +299,11 @@ function getLanguageDisplayName(lang)
     return lang
 end
 
--- Save language setting to file
-function saveLanguageSetting()
+local function saveLanguageSetting()
     love.filesystem.write(LANGUAGE_SETTINGS_FILE, currentLanguage)
 end
 
--- Load language setting from file
-function loadLanguageSetting()
+local function loadLanguageSetting()
     if love.filesystem.getInfo(LANGUAGE_SETTINGS_FILE) then
         local content = love.filesystem.read(LANGUAGE_SETTINGS_FILE)
         if content == "en" or content == "zh" or content == "ar" then
@@ -279,7 +312,11 @@ function loadLanguageSetting()
     end
 end
 
--- Simple JSON-like serialization for save data
+----------------------------
+-- Save System Helpers --
+----------------------------
+
+-- simple json-like serialization for save data
 local function serializeValue(val)
     local t = type(val)
     if t == "number" then
@@ -307,20 +344,16 @@ local function serializeValue(val)
     return "null"
 end
 
--- Save game state to file
-function saveGame()
-    -- Collect block positions
+local function saveGame()
     local blockData = {}
     for _, block in ipairs(buildingBlocks) do
         local bx, by = block:getPosition()
         table.insert(blockData, {x = bx, y = by})
     end
 
-    -- Collect player state
     local px, py = player:getPosition()
     local vx, vy = player:getLinearVelocity()
 
-    -- Build save data
     local saveData = {
         currentStage = currentStage,
         inventory = inventory,
@@ -329,10 +362,9 @@ function saveGame()
         playerVX = vx,
         playerVY = vy,
         blocks = blockData,
-        gameWon = gameWon
+        gameWon = gameWon,
     }
 
-    -- Serialize and write
     local json = serializeValue(saveData)
     local success, message = love.filesystem.write(SAVE_FILE, json)
     if success then
@@ -343,7 +375,7 @@ function saveGame()
     return success
 end
 
--- Parse a simple JSON-like string (basic parser for our save format)
+-- basic json parser for our save format
 local function parseValue(str, pos)
     pos = pos or 1
     -- Skip whitespace
@@ -413,13 +445,11 @@ local function parseValue(str, pos)
     return nil, pos
 end
 
--- Check if save file exists
-function hasSaveFile()
+local function hasSaveFile()
     return love.filesystem.getInfo(SAVE_FILE) ~= nil
 end
 
--- Load game state from file
-function loadGameState()
+local function loadGameState()
     if not hasSaveFile() then
         return nil
     end
@@ -434,18 +464,29 @@ function loadGameState()
     return data
 end
 
--- Apply loaded save data to game state
-function applySaveData(data)
+local function deleteSaveFile()
+    if hasSaveFile() then
+        love.filesystem.remove(SAVE_FILE)
+        print("Save file deleted")
+    end
+end
+
+---------------------------------
+-- Forward Declarations --
+---------------------------------
+-- these functions have interdependencies so we declare them here
+local loadStage
+local applySaveData
+
+applySaveData = function(data)
     if not data then return false end
 
-    -- Load the stage first (this sets up target position)
+    -- load the stage first (sets up target position)
     currentStage = data.currentStage or 1
     loadStage(currentStage)
 
-    -- Restore inventory
     inventory = data.inventory or {}
 
-    -- Restore player position and velocity
     if data.playerX and data.playerY then
         player:setPosition(data.playerX, data.playerY)
     end
@@ -453,7 +494,7 @@ function applySaveData(data)
         player:setLinearVelocity(data.playerVX, data.playerVY)
     end
 
-    -- Restore blocks (destroy current and recreate at saved positions)
+    -- recreate blocks at saved positions
     for _, block in ipairs(buildingBlocks) do
         block:destroy()
     end
@@ -472,33 +513,25 @@ function applySaveData(data)
         end
     end
 
-    -- Restore game won state
     gameWon = data.gameWon or false
 
     print("Game loaded!")
     return true
 end
 
--- Delete save file (for fresh start)
-function deleteSaveFile()
-    if hasSaveFile() then
-        love.filesystem.remove(SAVE_FILE)
-        print("Save file deleted")
-    end
-end
+--------------------------
+-- Physics Helpers --
+--------------------------
 
--- Get positions of objects within explosion radius
-function getObjectsInRadius(cx, cy, radius)
+local function getObjectsInRadius(cx, cy, radius)
     local results = {}
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local groundTop = windowHeight - GROUND_HEIGHT
 
-    -- Check ground
     if cy + radius >= groundTop then
         table.insert(results, {x = cx, y = groundTop})
     end
 
-    -- Check walls
     if cx - radius <= 0 then
         table.insert(results, {x = 0, y = cy})
     end
@@ -509,7 +542,6 @@ function getObjectsInRadius(cx, cy, radius)
         table.insert(results, {x = cx, y = 0})
     end
 
-    -- Check building blocks
     for _, block in ipairs(buildingBlocks) do
         local bx, by = block:getPosition()
         local dist = math.sqrt((cx - bx)^2 + (cy - by)^2)
@@ -522,23 +554,20 @@ function getObjectsInRadius(cx, cy, radius)
     return results
 end
 
--- Check if a point is inside a block (for drag detection)
-function isPointInBlock(block, px, py)
+local function isPointInBlock(block, px, py)
     local bx, by = block:getPosition()
     local halfSize = BLOCK_SIZE / 2
     return px >= bx - halfSize and px <= bx + halfSize and
            py >= by - halfSize and py <= by + halfSize
 end
 
--- Check if position overlaps with player
-function overlapsPlayer(x, y)
+local function overlapsPlayer(x, y)
     local px, py = player:getPosition()
     local dist = math.sqrt((x - px)^2 + (y - py)^2)
-    return dist < PLAYER_RADIUS + BLOCK_SIZE / 2 + 10  -- 10px buffer
+    return dist < PLAYER_RADIUS + BLOCK_SIZE / 2 + 10
 end
 
--- Check if a point is inside the pickup button (when a block is selected)
-function isPointInPickupButton(px, py)
+local function isPointInPickupButton(px, py)
     if not selectedBlock then return false end
     local currentButton = getCurrentPickupButton()
     if not currentButton then return false end
@@ -553,10 +582,13 @@ function isPointInPickupButton(px, py)
            py >= buttonY and py <= buttonY + buttonHeight
 end
 
--- Get the bounding box for an inventory slot at given index (1-based)
-function getInventorySlotBounds(index)
+--------------------------
+-- Inventory Helpers --
+--------------------------
+
+local function getInventorySlotBounds(index)
     local windowWidth, windowHeight = love.graphics.getDimensions()
-    local inventoryY = windowHeight - GROUND_HEIGHT + 5  -- Same as inventoryTopMargin
+    local inventoryY = windowHeight - GROUND_HEIGHT + 5
     local inventoryHeight = GROUND_HEIGHT - 5
 
     local slotCount = math.min(#inventory, MAX_VISIBLE_SLOTS)
@@ -569,8 +601,7 @@ function getInventorySlotBounds(index)
     return slotX, slotY, INVENTORY_SLOT_SIZE, INVENTORY_SLOT_SIZE
 end
 
--- Check if a point is inside an inventory slot, returns slot index or nil
-function getInventorySlotAtPoint(px, py)
+local function getInventorySlotAtPoint(px, py)
     if #inventory == 0 then return nil end
 
     for i = 1, math.min(#inventory, MAX_VISIBLE_SLOTS) do
@@ -583,18 +614,17 @@ function getInventorySlotAtPoint(px, py)
     return nil
 end
 
--- Spawn a block from inventory at the given position
-function spawnBlockFromInventory(index, x, y)
+local function spawnBlockFromInventory(index, x, y)
     if not inventory[index] then return false end
 
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local halfSize = BLOCK_SIZE / 2
 
-    -- Clamp position to valid area (not below ground, not off screen)
+    -- clamp position to valid area
     x = math.max(halfSize, math.min(windowWidth - halfSize, x))
     y = math.max(halfSize, math.min(windowHeight - GROUND_HEIGHT - halfSize, y))
 
-    -- Don't spawn if overlapping player
+    -- push away from player if overlapping
     if overlapsPlayer(x, y) then
         local px, py = player:getPosition()
         local dx, dy = x - px, y - py
@@ -608,120 +638,112 @@ function spawnBlockFromInventory(index, x, y)
         x, y = px + dx * pushDist, py + dy * pushDist
     end
 
-    -- Create the physics collider
     local collider = world:newRectangleCollider(x - halfSize, y - halfSize, BLOCK_SIZE, BLOCK_SIZE)
     collider:setType('static')
     collider:setCollisionClass('Block')
     table.insert(buildingBlocks, collider)
 
-    -- Remove from inventory
     table.remove(inventory, index)
 
     print("Block spawned from inventory! Remaining: " .. #inventory)
     return true
 end
 
-function love.load()
-    -- Load theme setting
-    loadThemeSetting()
+-----------------------
+-- LÖVE Callbacks --
+-----------------------
 
-    -- Load language setting
+function love.load()
+    loadThemeSetting()
     loadLanguageSetting()
 
-    -- Load pickup button images for all languages and themes
-    -- Light theme buttons
+    -- load pickup button images for all languages and themes
     pickupButtons.light.en = love.graphics.newImage("pickupButton.png")
     pickupButtons.light.zh = love.graphics.newImage("pickupButtonChinese.png")
     pickupButtons.light.ar = love.graphics.newImage("pickupButtonArabic.png")
-    -- Dark theme buttons
     pickupButtons.dark.en = love.graphics.newImage("pickupButton_dark.png")
     pickupButtons.dark.zh = love.graphics.newImage("pickupButtonChinese_dark.png")
     pickupButtons.dark.ar = love.graphics.newImage("pickupButtonArabic_dark.png")
-    pickupButton = pickupButtons.light.en  -- Legacy reference for compatibility
+    pickupButton = pickupButtons.light.en
 
-    -- Load fonts for all languages
-    fonts.en = love.graphics.newFont(FONT_SIZE)  -- Default system font for English
-    fonts.zh = love.graphics.newFont("fonts/NotoSansSC-Regular.ttf", FONT_SIZE)  -- Chinese font
-    fonts.ar = love.graphics.newFont("fonts/NotoSansArabic-Regular.ttf", FONT_SIZE)  -- Arabic font
+    -- load fonts for all languages
+    fonts.en = love.graphics.newFont(FONT_SIZE)
+    fonts.zh = love.graphics.newFont("fonts/NotoSansSC-Regular.ttf", FONT_SIZE)
+    fonts.ar = love.graphics.newFont("fonts/NotoSansArabic-Regular.ttf", FONT_SIZE)
 
-    -- Set initial font based on loaded language
     applyCurrentFont()
 
-    -- Create physics world with gravity using Windfield
+    -- create physics world with gravity
     world = wf.newWorld(0, 500, true)
 
-    -- Define collision classes for different object types
+    -- define collision classes
     world:addCollisionClass('Ground')
     world:addCollisionClass('Wall')
     world:addCollisionClass('Player')
     world:addCollisionClass('Block')
-    world:addCollisionClass('BlockDragging', {ignores = {'Player'}})  -- No collision while dragging
+    world:addCollisionClass('BlockDragging', {ignores = {'Player'}})
 
-    -- Get window dimensions
     local windowWidth, windowHeight = love.graphics.getDimensions()
 
-    -- Create ground (static body)
+    -- create ground
     ground = world:newRectangleCollider(0, windowHeight - GROUND_HEIGHT, windowWidth, GROUND_HEIGHT)
     ground:setType('static')
     ground:setCollisionClass('Ground')
 
-    -- Create invisible walls to keep player on screen
+    -- create invisible walls to keep player on screen
     local wallThickness = 20
 
-    -- Left wall
     walls.left = world:newRectangleCollider(-wallThickness, 0, wallThickness, windowHeight)
     walls.left:setType('static')
     walls.left:setCollisionClass('Wall')
 
-    -- Right wall
     walls.right = world:newRectangleCollider(windowWidth, 0, wallThickness, windowHeight)
     walls.right:setType('static')
     walls.right:setCollisionClass('Wall')
 
-    -- Top wall (ceiling)
     walls.top = world:newRectangleCollider(0, -wallThickness, windowWidth, wallThickness)
     walls.top:setType('static')
     walls.top:setCollisionClass('Wall')
 
-    -- Create player (dynamic body with gravity)
+    -- create player
     player = world:newCircleCollider(windowWidth / 2, windowHeight - GROUND_HEIGHT - PLAYER_RADIUS, PLAYER_RADIUS)
     player:setType('dynamic')
     player:setRestitution(0.3)
     player:setCollisionClass('Player')
 
-    -- Check for save file before loading stage
+    -- check for save file before loading stage
     if hasSaveFile() then
         saveExists = true
         showSaveDetectedScreen = true
-        -- Don't load stage yet - wait for user choice
     else
-        -- No save, load fresh
         loadStage(currentStage)
     end
 
-    -- Register unified input callbacks
+    -- register unified input callbacks
     Input.onPointerPressed = function(x, y) handlePointerPressed(x, y) end
     Input.onPointerReleased = function(x, y) handlePointerReleased(x, y) end
 end
 
--- Load a stage by index (keeps inventory intact)
-function loadStage(stageIndex)
+------------------------
+-- Stage Management --
+------------------------
+
+-- uses forward declaration from above
+loadStage = function(stageIndex)
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local stage = stages[stageIndex]
 
-        -- Handle Ending Stage
+    -- handle ending stage
     if stage.type == "ending" then
         gameWon = false
         selectedBlock = nil
         draggedBlock = nil
 
-        -- Destroy existing blocks
         for _, block in ipairs(buildingBlocks) do
             block:destroy()
         end
         buildingBlocks = {}
 
-        -- Delete save when reaching ending (game complete)
         deleteSaveFile()
 
         print("Loaded Ending Stage")
@@ -734,20 +756,19 @@ function loadStage(stageIndex)
         return false
     end
 
-    -- Reset game state (but NOT inventory)
+    -- reset game state (but NOT inventory)
     gameWon = false
     selectedBlock = nil
     draggedBlock = nil
     draggingFromInventory = false
     inventoryDragIndex = nil
 
-    -- Destroy existing blocks
     for _, block in ipairs(buildingBlocks) do
         block:destroy()
     end
     buildingBlocks = {}
 
-    -- Create blocks for this stage
+    -- create blocks for this stage
     for _, blockDef in ipairs(stage.blocks) do
         local x = windowWidth * blockDef.x
         local y = blockDef.y
@@ -757,7 +778,7 @@ function loadStage(stageIndex)
         table.insert(buildingBlocks, collider)
     end
 
-    -- Position target based on stage config
+    -- position target based on stage config
     if stage.targetPosition == "top-right" then
         target.x = windowWidth - target.radius - 20
         target.y = target.radius + 20
@@ -766,7 +787,7 @@ function loadStage(stageIndex)
         target.y = target.radius + 20
     end
 
-    -- Reset player position and velocity
+    -- reset player position and velocity
     player:setPosition(windowWidth / 2, windowHeight - GROUND_HEIGHT - PLAYER_RADIUS)
     player:setLinearVelocity(0, 0)
     player:setAngularVelocity(0)
@@ -777,18 +798,13 @@ function loadStage(stageIndex)
 end
 
 function love.update(dt)
-    -- Don't update physics if save detection screen is showing
     if showSaveDetectedScreen then return end
-
-    -- Don't update physics if options screen is showing
     if showOptionsScreen then return end
-
-    -- Don't update physics if game is won
     if gameWon then return end
 
     world:update(dt)
 
-    -- Check for victory (player overlaps target)
+    -- check for victory
     local px, py = player:getPosition()
     local dist = math.sqrt((px - target.x)^2 + (py - target.y)^2)
     if dist < target.radius + PLAYER_RADIUS then
@@ -796,12 +812,11 @@ function love.update(dt)
         return
     end
 
-    -- Update dragged block position using Input abstraction
+    -- update dragged block position
     if draggedBlock then
         local mx, my = Input.getPosition()
         local newX, newY = mx + dragOffsetX, my + dragOffsetY
 
-        -- Keep block on screen
         local windowWidth, windowHeight = love.graphics.getDimensions()
         local halfSize = BLOCK_SIZE / 2
         newX = math.max(halfSize, math.min(windowWidth - halfSize, newX))
@@ -810,37 +825,34 @@ function love.update(dt)
         draggedBlock:setPosition(newX, newY)
     end
 
-    -- Update Input module for mouse position (when not touching)
     Input.updateFromMouse()
 end
 
--- Perform explosion - query nearby objects and calculate repulsion force
-function performExplosion()
+--------------------------
+-- Explosion System --
+--------------------------
+
+local function performExplosion()
     if gameWon then return end
     local px, py = player:getPosition()
 
     local nearbyObjects = getObjectsInRadius(px, py, EXPLOSION_RADIUS)
 
-    -- Calculate cumulative force direction based on nearby objects
+    -- calculate cumulative force direction based on nearby objects
     local forceX, forceY = 0, 0
     local objectsInRange = 0
 
     for _, obj in ipairs(nearbyObjects) do
         local ox, oy = obj.x, obj.y
-
-        -- Calculate direction FROM the object TO the player (repulsion)
         local dx = px - ox
         local dy = py - oy
-
-        -- Calculate distance
         local distance = math.sqrt(dx * dx + dy * dy)
 
         if distance > 0 then
-            -- Normalize direction
             dx = dx / distance
             dy = dy / distance
 
-            -- Closer objects contribute more force (inverse relationship)
+            -- closer objects contribute more force
             local strength = 1 - (distance / EXPLOSION_RADIUS)
             strength = math.max(0, strength)
 
@@ -848,13 +860,11 @@ function performExplosion()
             forceY = forceY + dy * strength
             objectsInRange = objectsInRange + 1
         else
-            -- Object is exactly at player position - push up
             forceY = forceY - 1
             objectsInRange = objectsInRange + 1
         end
     end
 
-    -- Only apply force if there are objects to push off of
     if objectsInRange > 0 then
         local magnitude = math.sqrt(forceX * forceX + forceY * forceY)
 
@@ -867,14 +877,15 @@ function performExplosion()
         end
     end
 
-    -- Auto-save on every explosion
     saveGame()
 end
 
--- Get Y button bounds for save detection screen
-function getSaveYButtonBounds()
+--------------------
+-- UI Helpers --
+--------------------
+
+local function getSaveYButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
-    local font = love.graphics.getFont()
     local btnW = 80
     local btnH = 50
     local spacing = 40
@@ -883,10 +894,8 @@ function getSaveYButtonBounds()
     return btnX, btnY, btnW, btnH
 end
 
--- Get N button bounds for save detection screen
-function getSaveNButtonBounds()
+local function getSaveNButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
-    local font = love.graphics.getFont()
     local btnW = 80
     local btnH = 50
     local spacing = 40
@@ -895,20 +904,17 @@ function getSaveNButtonBounds()
     return btnX, btnY, btnW, btnH
 end
 
--- Check if point is in Y button
-function isPointInSaveYButton(px, py)
+local function isPointInSaveYButton(px, py)
     local bx, by, bw, bh = getSaveYButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Check if point is in N button
-function isPointInSaveNButton(px, py)
+local function isPointInSaveNButton(px, py)
     local bx, by, bw, bh = getSaveNButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Options button bounds (bottom right corner)
-function getOptionsButtonBounds()
+local function getOptionsButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
     local text = getText("options")
@@ -920,34 +926,30 @@ function getOptionsButtonBounds()
     return btnX, btnY, btnW, btnH
 end
 
--- Check if point is in options button
-function isPointInOptionsButton(px, py)
+local function isPointInOptionsButton(px, py)
     local bx, by, bw, bh = getOptionsButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Options screen X button bounds (bottom right of options panel)
-function getOptionsXButtonBounds()
+local function getOptionsXButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local btnSize = 40
     local panelW = 300
-    local panelH = 250  -- Increased for language dropdown
+    local panelH = 250
     local panelX = windowWidth / 2 - panelW / 2
     local panelY = windowHeight / 2 - panelH / 2
     return panelX + panelW - btnSize - 10, panelY + panelH - btnSize - 10, btnSize, btnSize
 end
 
--- Check if point is in options X button
-function isPointInOptionsXButton(px, py)
+local function isPointInOptionsXButton(px, py)
     local bx, by, bw, bh = getOptionsXButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Theme dropdown bounds
-function getThemeDropdownBounds()
+local function getThemeDropdownBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local panelW = 300
-    local panelH = 250  -- Increased for language dropdown
+    local panelH = 250
     local panelX = windowWidth / 2 - panelW / 2
     local panelY = windowHeight / 2 - panelH / 2
     local dropW = 150
@@ -957,20 +959,17 @@ function getThemeDropdownBounds()
     return dropX, dropY, dropW, dropH
 end
 
--- Get dropdown option bounds (when dropdown is open)
-function getThemeDropdownOptionBounds(index)
+local function getThemeDropdownOptionBounds(index)
     local dropX, dropY, dropW, dropH = getThemeDropdownBounds()
     return dropX, dropY + dropH * index, dropW, dropH
 end
 
--- Check if point is in dropdown header
-function isPointInThemeDropdown(px, py)
+local function isPointInThemeDropdown(px, py)
     local bx, by, bw, bh = getThemeDropdownBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Check if point is in a dropdown option (returns option index or nil)
-function getDropdownOptionAtPoint(px, py)
+local function getDropdownOptionAtPoint(px, py)
     if not dropdownOpen then return nil end
     local options = {"light", "dark", "time"}
     for i, _ in ipairs(options) do
@@ -982,42 +981,37 @@ function getDropdownOptionAtPoint(px, py)
     return nil
 end
 
--- Get display name for theme setting (localized)
-function getThemeDisplayName(setting)
+local function getThemeDisplayName(setting)
     if setting == "light" then return getText("light")
     elseif setting == "dark" then return getText("dark")
     else return getText("timeBased")
     end
 end
 
--- Language dropdown bounds (below theme dropdown)
-function getLanguageDropdownBounds()
+local function getLanguageDropdownBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local panelW = 300
-    local panelH = 250  -- Increased panel height for language dropdown
+    local panelH = 250
     local panelX = windowWidth / 2 - panelW / 2
     local panelY = windowHeight / 2 - panelH / 2
     local dropW = 150
     local dropH = 30
     local dropX = panelX + panelW / 2 - dropW / 2
-    local dropY = panelY + 155  -- Below theme dropdown
+    local dropY = panelY + 155
     return dropX, dropY, dropW, dropH
 end
 
--- Get language dropdown option bounds (when dropdown is open)
-function getLanguageDropdownOptionBounds(index)
+local function getLanguageDropdownOptionBounds(index)
     local dropX, dropY, dropW, dropH = getLanguageDropdownBounds()
     return dropX, dropY + dropH * index, dropW, dropH
 end
 
--- Check if point is in language dropdown header
-function isPointInLanguageDropdown(px, py)
+local function isPointInLanguageDropdown(px, py)
     local bx, by, bw, bh = getLanguageDropdownBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
--- Check if point is in a language dropdown option (returns option index or nil)
-function getLanguageDropdownOptionAtPoint(px, py)
+local function getLanguageDropdownOptionAtPoint(px, py)
     if not languageDropdownOpen then return nil end
     local options = {"en", "zh", "ar"}
     for i, _ in ipairs(options) do
@@ -1448,7 +1442,7 @@ function love.draw()
     end
 end
 
--- Mouse input callbacks (delegate to Input abstraction)
+-- mouse input callbacks
 function love.mousepressed(x, y, button)
     Input.handleMousePressed(x, y, button)
 end
@@ -1457,7 +1451,7 @@ function love.mousereleased(x, y, button)
     Input.handleMouseReleased(x, y, button)
 end
 
--- Touch input callbacks (delegate to Input abstraction)
+-- touch input callbacks
 function love.touchpressed(id, x, y, dx, dy, pressure)
     Input.handleTouchPressed(id, x, y)
 end
@@ -1470,7 +1464,24 @@ function love.touchmoved(id, x, y, dx, dy, pressure)
     Input.handleTouchMoved(id, x, y)
 end
 
--- Keyboard input (R for debug restart only, ESC to quit)
+--------------------------
+-- Scene Management --
+--------------------------
+
+local function restartScene()
+    inventory = {}
+    deleteSaveFile()
+    loadStage(currentStage)
+    print("Scene restarted!")
+end
+
+local function nextStage()
+    local nextIndex = currentStage + 1
+    currentStage = nextIndex
+    loadStage(nextIndex)
+end
+
+-- keyboard input
 function love.keypressed(key)
     if key == "escape" then
         love.event.quit()
@@ -1479,26 +1490,7 @@ function love.keypressed(key)
     end
 end
 
--- Restart the current stage (clears inventory and save)
-function restartScene()
-    -- Clear inventory on restart
-    inventory = {}
-    -- Delete save file on restart
-    deleteSaveFile()
-    -- Reload current stage
-    loadStage(currentStage)
-    print("Scene restarted!")
-end
-
--- Advance to the next stage (keeps inventory)
-function nextStage()
-    local nextIndex = currentStage + 1
-    currentStage = nextIndex
-    loadStage(nextIndex)
-end
-
--- Get the Next Stage button bounds (for hit detection)
-function getNextStageButtonBounds()
+local function getNextStageButtonBounds()
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
     local buttonText = getText("nextStage")
@@ -1513,14 +1505,13 @@ function getNextStageButtonBounds()
     return buttonX, buttonY, buttonWidth, buttonHeight
 end
 
--- Check if a point is inside the Next Stage button
-function isPointInNextStageButton(px, py)
+local function isPointInNextStageButton(px, py)
     if not gameWon then return false end
     local bx, by, bw, bh = getNextStageButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
 end
 
-function isPointInRestartButton(px, py)
+local function isPointInRestartButton(px, py)
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local font = love.graphics.getFont()
 
@@ -1534,69 +1525,79 @@ function isPointInRestartButton(px, py)
            py >= btnY and py <= btnY + btnH
 end
 
--- Check if a point is on empty space (not on any interactive element)
--- Used to trigger explosion when tapping background
-function isEmptySpace(px, py)
+-- checks if point is on empty space (for explosion triggering)
+local function isEmptySpace(px, py)
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local inventoryY = windowHeight - GROUND_HEIGHT + 5
 
-    -- Over inventory area
     if py >= inventoryY then return false end
 
-    -- Over target
     local targetDist = math.sqrt((px - target.x)^2 + (py - target.y)^2)
     if targetDist < target.radius then return false end
 
-    -- Over player
     local playerX, playerY = player:getPosition()
     local playerDist = math.sqrt((px - playerX)^2 + (py - playerY)^2)
     if playerDist < PLAYER_RADIUS then return false end
 
-    -- Over any block
     for _, block in ipairs(buildingBlocks) do
         if isPointInBlock(block, px, py) then return false end
     end
 
-    -- Over pickup button
     if isPointInPickupButton(px, py) then return false end
-
-    -- Over Next Stage button
     if gameWon and isPointInNextStageButton(px, py) then return false end
 
-    -- Over Restart button (ending stage)
     if stages[currentStage] and stages[currentStage].type == "ending" then
         if isPointInRestartButton(px, py) then return false end
     end
 
-    -- Over Options button
     if isPointInOptionsButton(px, py) then return false end
 
     return true
 end
 
--- Unified pointer pressed handler (called by Input abstraction)
-function handlePointerPressed(x, y)
-    -- Handle save detection screen buttons
+--------------------------
+-- Input Handlers --
+--------------------------
+
+local function pickupSelectedBlock()
+    if not selectedBlock or gameWon then return end
+
+    for i, block in ipairs(buildingBlocks) do
+        if block == selectedBlock then
+            table.insert(inventory, {
+                type = "square",
+                size = BLOCK_SIZE,
+            })
+
+            selectedBlock:destroy()
+            table.remove(buildingBlocks, i)
+            selectedBlock = nil
+
+            print("Block picked up! Inventory count: " .. #inventory)
+            break
+        end
+    end
+end
+
+local function handlePointerPressed(x, y)
+    -- handle save detection screen
     if showSaveDetectedScreen then
         if isPointInSaveYButton(x, y) then
-            -- Load the save
             local saveData = loadGameState()
             if saveData then
                 showSaveDetectedScreen = false
                 applySaveData(saveData)
             end
         elseif isPointInSaveNButton(x, y) then
-            -- Start fresh, delete save
             showSaveDetectedScreen = false
             deleteSaveFile()
             loadStage(1)
         end
-        return  -- Block all other input while save screen is showing
+        return
     end
 
-    -- Handle options screen input
+    -- handle options screen
     if showOptionsScreen then
-        -- Check X button first
         if isPointInOptionsXButton(x, y) then
             showOptionsScreen = false
             dropdownOpen = false
@@ -1604,7 +1605,6 @@ function handlePointerPressed(x, y)
             return
         end
 
-        -- Check theme dropdown options (if open)
         if dropdownOpen then
             local optIndex = getDropdownOptionAtPoint(x, y)
             if optIndex then
@@ -1616,57 +1616,52 @@ function handlePointerPressed(x, y)
             end
         end
 
-        -- Check language dropdown options (if open)
         if languageDropdownOpen then
             local langOptIndex = getLanguageDropdownOptionAtPoint(x, y)
             if langOptIndex then
                 local langOptions = {"en", "zh", "ar"}
                 currentLanguage = langOptions[langOptIndex]
                 saveLanguageSetting()
-                applyCurrentFont()  -- Apply new font immediately
+                applyCurrentFont()
                 languageDropdownOpen = false
                 return
             end
         end
 
-        -- Check theme dropdown header (toggle open/close)
         if isPointInThemeDropdown(x, y) then
             dropdownOpen = not dropdownOpen
-            languageDropdownOpen = false  -- Close other dropdown
+            languageDropdownOpen = false
             return
         end
 
-        -- Check language dropdown header (toggle open/close)
         if isPointInLanguageDropdown(x, y) then
             languageDropdownOpen = not languageDropdownOpen
-            dropdownOpen = false  -- Close other dropdown
+            dropdownOpen = false
             return
         end
 
-        -- Clicking elsewhere in options screen closes both dropdowns
         dropdownOpen = false
         languageDropdownOpen = false
         return
     end
 
-    -- Check for options button click
     if isPointInOptionsButton(x, y) then
         showOptionsScreen = true
         dropdownOpen = false
         return
     end
 
-    -- Check for ending stage restart button
+    -- ending stage restart
     if stages[currentStage] and stages[currentStage].type == "ending" then
         if isPointInRestartButton(x, y) then
             inventory = {}
-            deleteSaveFile()  -- Clear save when restarting from ending
+            deleteSaveFile()
             loadStage(1)
         end
         return
     end
 
-    -- Check for Next Stage button click on victory screen
+    -- victory screen next stage
     if gameWon then
         if isPointInNextStageButton(x, y) then
             nextStage()
@@ -1674,13 +1669,13 @@ function handlePointerPressed(x, y)
         return
     end
 
-    -- First, check if clicking on the pickup button (takes priority)
+    -- pickup button takes priority
     if isPointInPickupButton(x, y) then
         pickupSelectedBlock()
         return
     end
 
-    -- Check if clicking on an inventory slot (starts inventory drag)
+    -- inventory slot click
     local slotIndex = getInventorySlotAtPoint(x, y)
     if slotIndex then
         draggingFromInventory = true
@@ -1689,84 +1684,73 @@ function handlePointerPressed(x, y)
         return
     end
 
-    -- Record start position for click vs drag detection
     dragStartX, dragStartY = x, y
     pointerPressX, pointerPressY = x, y
 
-    -- Check if clicking on a building block
+    -- check if clicking on a block
     for _, block in ipairs(buildingBlocks) do
         if isPointInBlock(block, x, y) then
             draggedBlock = block
             local bx, by = block:getPosition()
             dragOffsetX = bx - x
             dragOffsetY = by - y
-            -- Disable collision with player while dragging
             block:setCollisionClass('BlockDragging')
             break
         end
     end
 
-    -- If clicked outside any block, deselect current selection
     if not draggedBlock then
         selectedBlock = nil
     end
 end
 
--- Unified pointer released handler (called by Input abstraction)
-function handlePointerReleased(x, y)
-    -- Handle inventory drag release
+local function handlePointerReleased(x, y)
+    -- handle inventory drag release
     if draggingFromInventory and inventoryDragIndex then
         local windowHeight = love.graphics.getHeight()
         local inventoryY = windowHeight - GROUND_HEIGHT + 5
 
-        -- Only spawn if released above the inventory area (in the game world)
         if y < inventoryY then
             spawnBlockFromInventory(inventoryDragIndex, x, y)
         end
 
-        -- Reset inventory drag state
         draggingFromInventory = false
         inventoryDragIndex = nil
         return
     end
 
-    -- Handle world block drag release
+    -- handle block drag release
     if draggedBlock then
-        -- Calculate how far the pointer moved during this press
         local dragDist = math.sqrt((x - dragStartX)^2 + (y - dragStartY)^2)
 
-        -- If pointer barely moved, treat as a tap (select the block)
+        -- tap to select
         if dragDist < DRAG_THRESHOLD then
-            -- Select this block
             selectedBlock = draggedBlock
-            -- Re-enable collision since we didn't actually drag
             draggedBlock:setCollisionClass('Block')
             draggedBlock = nil
             return
         end
 
-        -- Otherwise, it was a drag - handle as before
+        -- push away from player if overlapping
         local bx, by = draggedBlock:getPosition()
         if overlapsPlayer(bx, by) then
-            -- Push block away from player
             local px, py = player:getPosition()
             local dx, dy = bx - px, by - py
             local dist = math.sqrt(dx * dx + dy * dy)
             if dist > 0 then
                 dx, dy = dx / dist, dy / dist
             else
-                dx, dy = 0, -1  -- Default to pushing up
+                dx, dy = 0, -1
             end
             local pushDist = PLAYER_RADIUS + BLOCK_SIZE / 2 + 15
             draggedBlock:setPosition(px + dx * pushDist, py + dy * pushDist)
         end
-        -- Re-enable collision with player
         draggedBlock:setCollisionClass('Block')
         draggedBlock = nil
         return
     end
 
-    -- Check for empty space tap -> trigger explosion
+    -- tap empty space to trigger explosion
     local tapDist = math.sqrt((x - pointerPressX)^2 + (y - pointerPressY)^2)
     if tapDist < DRAG_THRESHOLD and isEmptySpace(x, y) then
         if not gameWon then
@@ -1775,41 +1759,10 @@ function handlePointerReleased(x, y)
     end
 end
 
--- Pick up the selected block and add it to inventory
-function pickupSelectedBlock()
-    if not selectedBlock or gameWon then return end
-
-    -- Find and remove the block from buildingBlocks array
-    for i, block in ipairs(buildingBlocks) do
-        if block == selectedBlock then
-            -- Add to inventory (store block properties for later use)
-            table.insert(inventory, {
-                type = "square",
-                size = BLOCK_SIZE
-            })
-
-            -- Remove physics body from the world
-            selectedBlock:destroy()
-
-            -- Remove from the blocks table
-            table.remove(buildingBlocks, i)
-
-            -- Clear selection
-            selectedBlock = nil
-
-            -- Debug output (can be removed later)
-            print("Block picked up! Inventory count: " .. #inventory)
-            break
-        end
-    end
-end
-
--- Get the current inventory (for UI or other systems)
-function getInventory()
+local function getInventory()
     return inventory
 end
 
--- Get count of items in inventory
-function getInventoryCount()
+local function getInventoryCount()
     return #inventory
 end

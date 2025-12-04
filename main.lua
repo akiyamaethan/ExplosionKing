@@ -64,6 +64,10 @@ local stages = {
             {x = 0.50, y = 50},
             {x = 0.75, y = 50}
         }
+    },
+    {
+        name = "Stage 3",
+        type = "ending"  -- special stage type
     }
 }
 
@@ -253,6 +257,23 @@ end
 function loadStage(stageIndex)
     local windowWidth, windowHeight = love.graphics.getDimensions()
     local stage = stages[stageIndex]
+
+        -- Handle Ending Stage
+    if stage.type == "ending" then
+        gameWon = false
+        selectedBlock = nil
+        draggedBlock = nil
+
+        -- Destroy existing blocks
+        for _, block in ipairs(buildingBlocks) do
+            block:destroy()
+        end
+        buildingBlocks = {}
+
+        print("Loaded Ending Stage")
+        currentStage = stageIndex
+        return true
+    end
 
     if not stage then
         print("No more stages! You completed the game!")
@@ -573,9 +594,48 @@ function love.draw()
         -- Button text
         love.graphics.print(buttonText, buttonX + buttonPadding, buttonY + buttonPadding/2)
     end
+        -- SPECIAL ENDING STAGE SCREEN
+    if stages[currentStage] and stages[currentStage].type == "ending" then
+        -- Black background
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.rectangle("fill", 0, 0, windowWidth, windowHeight)
+
+        -- Title text
+        love.graphics.setColor(1, 1, 1)
+        local font = love.graphics.getFont()
+        local text = "Conclusive Ending"
+        local textWidth = font:getWidth(text)
+        love.graphics.print(text, windowWidth/2 - textWidth/2, windowHeight/2 - 80)
+
+        -- Restart button
+        local buttonText = "Restart Game"
+        local btnW = font:getWidth(buttonText) + 32
+        local btnH = font:getHeight() + 20
+        local btnX = windowWidth/2 - btnW/2
+        local btnY = windowHeight/2
+
+        -- Button background
+        love.graphics.setColor(0.3, 0.6, 1)
+        love.graphics.rectangle("fill", btnX, btnY, btnW, btnH, 6)
+
+        -- Button border
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", btnX, btnY, btnW, btnH, 6)
+
+        -- Button label
+        love.graphics.print(buttonText, btnX + 16, btnY + 10)
+    end
 end
 
 function love.mousepressed(x, y, button)
+    -- Check for ending stage restart button
+    if stages[currentStage] and stages[currentStage].type == "ending" then
+        if isPointInRestartButton(x, y) then
+            inventory = {}         -- clear inventory
+            loadStage(1)           -- restart game at stage 1
+        end
+        return
+    end
     if button == 1 then  -- Left click
         -- Check for Next Stage button click on victory screen
         if gameWon then
@@ -699,9 +759,9 @@ end
 
 -- Advance to the next stage (keeps inventory)
 function nextStage()
-    if loadStage(currentStage + 1) then
-        print("Advanced to next stage!")
-    end
+    local nextIndex = currentStage + 1
+    currentStage = nextIndex
+    loadStage(nextIndex)
 end
 
 -- Get the Next Stage button bounds (for hit detection)
@@ -725,6 +785,20 @@ function isPointInNextStageButton(px, py)
     if not gameWon then return false end
     local bx, by, bw, bh = getNextStageButtonBounds()
     return px >= bx and px <= bx + bw and py >= by and py <= by + bh
+end
+
+function isPointInRestartButton(px, py)
+    local windowWidth, windowHeight = love.graphics.getDimensions()
+    local font = love.graphics.getFont()
+
+    local buttonText = "Restart Game"
+    local btnW = font:getWidth(buttonText) + 32
+    local btnH = font:getHeight() + 20
+    local btnX = windowWidth/2 - btnW/2
+    local btnY = windowHeight/2
+
+    return px >= btnX and px <= btnX + btnW and
+           py >= btnY and py <= btnY + btnH
 end
 
 -- Pick up the selected block and add it to inventory

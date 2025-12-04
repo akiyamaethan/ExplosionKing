@@ -52,10 +52,6 @@ What are you hoping to learn by approaching the project with the tools and mater
 Surprisingly, we have been able to use the same tools we originally decided on as of now. We had to add one more (windfield) to account for 3rd party physics, but other than that our stack has remained the same. We kind of fibbed our team roles and we have all been pretty much covering all the roles so maybe we can work on tightening that up for the next milestone. Game design-wise, our plans have changed drastically. We originally wanted to go with preset levels that put the player somewhere with a goal to reach elsewhere and just let them press space at the right time until they reached it. This was reminiscent of Geometry Dash. As you will see, for this milestone, we have pivoted to a sandbox sort of design. We now present the player with a pretty much emtpy level, but provide them shapes to place around the level and form their own solution to the problem. We think this will be much more interesting moving forward. 
 
 
-
-## Next steps:
-Next up, We need to add another scene that the player can bring building blocks into using their inventory. This scene should be a copy of the first scene but with the target in the top left.
-
 # Devlog Entry - 12/3/2025
 
 ## How we satisfied the software requirements - F2
@@ -72,3 +68,6 @@ Next up, We need to add another scene that the player can bring building blocks 
 6 - Players succeed or fail based on their decisions. If you place your blocks poorly or trigger your explosions at the wrong time, you won’t reach the goal. If you think ahead and experiment, you’ll eventually figure out a working solution. Nothing here is random and the results are always consistent, so progress comes from learning how the system behaves and planning around that.
 
 7 - The game now reaches a final scene after the stages are complete. When the last goal is reached, the player enters an ending screen that wraps the experience up and gives the option to restart the game.
+
+## Reflection
+Looking back on the plan changes made to implement F2, the most exciting one was to allow the player to gather building blocks between levels to satisfy the inventory requirement. In playtesting, this ability led to some epic emergent gameplay and we are excited to see how this feature develops. The implementation of stages allowed us to use some JSON and further enable the player to use their inventory to their advantage. We have embraced the physics sandbox theme for this game and are moving forward as such.

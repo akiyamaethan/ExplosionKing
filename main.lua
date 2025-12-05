@@ -477,6 +477,8 @@ end
 -- these functions have interdependencies so we declare them here
 local loadStage
 local applySaveData
+local handlePointerPressed
+local handlePointerReleased
 
 applySaveData = function(data)
     if not data then return false end
@@ -1579,7 +1581,7 @@ local function pickupSelectedBlock()
     end
 end
 
-local function handlePointerPressed(x, y)
+handlePointerPressed = function(x, y)
     -- handle save detection screen
     if showSaveDetectedScreen then
         if isPointInSaveYButton(x, y) then
@@ -1704,7 +1706,7 @@ local function handlePointerPressed(x, y)
     end
 end
 
-local function handlePointerReleased(x, y)
+handlePointerReleased = function(x, y)
     -- handle inventory drag release
     if draggingFromInventory and inventoryDragIndex then
         local windowHeight = love.graphics.getHeight()

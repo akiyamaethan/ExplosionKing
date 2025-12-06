@@ -74,3 +74,25 @@ Surprisingly, we have been able to use the same tools we originally decided on a
 Looking back on the plan changes made to implement F2, the most exciting one was to allow the player to gather building blocks between levels to satisfy the inventory requirement. In playtesting, this ability led to some epic emergent gameplay and we are excited to see how this feature develops. The implementation of stages allowed us to use some JSON and further enable the player to use their inventory to their advantage. We have embraced the physics sandbox theme for this game and are moving forward as such.
 =======
 >>>>>>> Stashed changes
+
+Devlog Entry - 12/10/2025
+How we satisfied the software requirements for F3
+
+Selected requirements
+For this milestone we decided to add a save system, visual themes, touchscreen support, and language support for English, Chinese, and Arabic. We chose these because they felt like natural extensions of the systems we already had in place and they gave us a chance to polish the game in ways that players would actually notice. They also let us practice skills that are important in real projects, like handling different input devices and supporting different writing systems.
+
+1
+We added a save system that keeps track of the player's stage, inventory, and progress. The game now saves automatically when important actions happen, like finishing a stage or moving pieces around. When the game starts up it looks for a save file and restores everything so the player can continue where they left off. This keeps the player from losing progress if they close the window or crash, and it makes the whole experience feel more stable.
+
+2
+To support visual themes we added both a light and dark version of the main interface elements and made the game check the player's operating system to see which one to use. This means the game quietly matches whatever style the player uses outside the game. It helps the experience feel more consistent and it adds a bit of personality without asking the player to change any settings.
+
+3
+We added touchscreen support by treating mouse input and touch input as the same kind of pointer. The game now responds to taps and drags just like clicks and mouse movement. Because of this, the whole game can be played on a touchscreen without needing a keyboard or mouse. This makes the controls more flexible and opens the game up to more devices.
+
+4
+We wanted the game to be usable by players who speak different languages, so we added support for English, Chinese, and Arabic. The interface now switches to the correct text and uses the proper writing direction when needed. The Arabic version reads from right to left and the Chinese version uses the expected characters. We also made sure the buttons change appropriately when the theme switches between light and dark. This kind of support helps the game feel more welcoming and shows that the interface can adapt to different audiences.
+
+## Reflection
+
+The team collectively was fairly certain on the changes we should make due to some of the f3 requirements being more difficult than the 4 that we picked (3,4,5,6). We felt as though the save system would not be difficult to implement where it is stored after any major occurence within the game. Supporting light and dark mode was something that we thought would have been difficult to implement but easy to understand. The game already supported touchscreen once we had removed the option for any keyboard inputs. Implementing other languages was one of the longer changes as we had to create a few images of translated buttons for the game. Overall the team was very concise in the changes we chose to make.
